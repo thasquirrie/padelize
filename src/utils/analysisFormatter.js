@@ -279,25 +279,54 @@ const transformNewAnalysisResults = (newFormatResponse) => {
     return newFormatResponse;
   }
 
+  // Helper function to safely parse numeric values with units
+  const parseValueWithUnit = (value, unit) => {
+    if (!value) return 0;
+    const numStr = value.toString().replace(unit, "").trim();
+    return parseFloat(numStr) || 0;
+  };
+
   // Convert numbered player results to player analytics format
   const players = [];
+  const playerColors = [
+    [255, 0, 0],    // Red for player 'a'
+    [0, 0, 255],    // Blue for player 'b'
+    [0, 255, 0],    // Green for player 'c'
+    [255, 165, 0],  // Orange for player 'd'
+  ];
 
-  Object.keys(results).forEach((playerKey) => {
+  Object.keys(results).forEach((playerKey, index) => {
     const playerData = results[playerKey];
 
     // Convert the new format metrics to the expected format
+    // Note: Units changed from Miles/Hour to Kilometers/Hour in the new API
     const player = {
       player_id: playerKey, // Store the AI server key (a, b, c, d, etc.)
-      color: [255, 0, 0], // Default color, would need to be provided from match data
-      average_speed_kmh:
-        parseFloat(
-          playerData["Average Speed"]?.replace(" Miles per Hour", "")
-        ) * 1.60934 || 0, // Convert MPH to KMH
-      total_distance_km:
-        parseFloat(playerData["Distance Covered"]?.replace(" Meters", "")) /
-          1000 || 0, // Convert meters to km
-      average_distance_from_center_km: 0, // Not provided in new format
-      calories_burned: 0, // Not provided in new format
+      color: playerColors[index] || [128, 128, 128], // Use default colors or gray
+      
+      // Distance is now in Meters (was Miles before)
+      total_distance_km: parseValueWithUnit(playerData["Distance Covered"], "Meters") / 1000,
+      
+      // Speed is now in Kilometers per Hour (was Miles per Hour before)
+      average_speed_kmh: parseValueWithUnit(playerData["Average Speed"], "Kilometers per Hour"),
+      peak_speed_kmh: parseValueWithUnit(playerData["Peak Speed"], "Kilometers per Hour"),
+      
+      // Percentages remain the same
+      net_dominance_percentage: parseValueWithUnit(playerData["Net Dominance"], "%"),
+      dead_zone_presence_percentage: parseValueWithUnit(playerData["Dead Zone Presence"], "%"),
+      baseline_play_percentage: parseValueWithUnit(playerData["Baseline Play"], "%"),
+      
+      // New field: Total Sprint Bursts
+      total_sprint_bursts: parseInt(playerData["Total Sprint Bursts"]) || 0,
+      
+      // Player heatmap URL
+      player_heatmap: playerData["Player Heatmap"] || null,
+      
+      // Fields not provided by new API - set defaults
+      average_distance_from_center_km: 0,
+      calories_burned: 0,
+      
+      // Shots data - not provided in new format yet
       shots: {
         total_shots: 0,
         forehand: 0,
@@ -305,29 +334,16 @@ const transformNewAnalysisResults = (newFormatResponse) => {
         volley: 0,
         smash: 0,
         success: 0,
-        // success_rate:
-        //   parseFloat(playerData["Net Dominance"]?.replace(" %", "")) || 0,
+        success_rate: 0,
       },
       shot_events: [],
       highlight_urls: [],
-      // Additional metrics from new format
-      peak_speed_kmh:
-        parseFloat(playerData["Peak Speed"]?.replace(" Miles per Hour", "")) *
-          1.60934 || 0,
-      net_dominance_percentage:
-        parseFloat(playerData["Net Dominance"]?.replace(" %", "")) || 0,
-      dead_zone_presence_percentage:
-        parseFloat(playerData["Dead Zone Presence"]?.replace(" %", "")) || 0,
-      baseline_play_percentage:
-        parseFloat(playerData["Baseline Play"]?.replace(" %", "")) || 0,
     };
 
-    console.log("Transformed player data:", player);
+    console.log(`Transformed player ${playerKey}:`, player);
 
     players.push(player);
   });
-
-  console.log({});
 
   // Return in expected format
   return {

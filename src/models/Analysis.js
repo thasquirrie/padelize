@@ -34,7 +34,7 @@ const shotEventSchema = new mongoose.Schema(
     type: {
       type: String,
       required: false,
-      enum: ["forehand", "backhand", "volley", "smash"],
+      enum: ['forehand', 'backhand', 'volley', 'smash'],
     },
     success: {
       type: Boolean,
@@ -258,6 +258,16 @@ const playerSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    total_sprint_bursts: {
+      type: Number,
+      required: false,
+      min: 0,
+      default: 0,
+    },
+    player_heatmap: {
+      type: String,
+      required: false,
+    },
   },
 
   { _id: false }
@@ -344,7 +354,7 @@ const filesSchema = new mongoose.Schema(
             return false;
           }
         },
-        message: "Player analytics URL must be a valid URL",
+        message: 'Player analytics URL must be a valid URL',
       },
     },
     player_heatmap_overlay: {
@@ -426,7 +436,7 @@ const analysisMetadataSchema = new mongoose.Schema(
     storage: {
       type: String,
       required: true,
-      enum: ["s3", "local", "gcs", "azure"],
+      enum: ['s3', 'local', 'gcs', 'azure'],
     },
   },
   { _id: false }
@@ -445,14 +455,14 @@ const analysisSchema = new mongoose.Schema(
       type: String,
       required: true,
       enum: [
-        "pending",
-        "processing",
-        "progressing",
-        "completed",
-        "failed",
-        "cancelled",
+        'pending',
+        'processing',
+        'progressing',
+        'completed',
+        'failed',
+        'cancelled',
       ],
-      default: "pending",
+      default: 'pending',
     },
     player_analytics: {
       type: playerAnalyticsSchema,
@@ -477,12 +487,12 @@ const analysisSchema = new mongoose.Schema(
     error_message: {
       type: String,
       required: function () {
-        return this.status === "failed";
+        return this.status === 'failed';
       },
     },
     created_by: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: 'User',
       required: true,
     },
     updated_at: {
@@ -492,23 +502,23 @@ const analysisSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    collection: "analyses",
+    collection: 'analyses',
   }
 );
 
 // Indexes for better query performance
 analysisSchema.index({ match_id: 1, status: 1 });
 analysisSchema.index({ created_by: 1, status: 1 });
-analysisSchema.index({ "metadata.created_at": -1 });
-analysisSchema.index({ "player_analytics.players.player_id": 1 });
+analysisSchema.index({ 'metadata.created_at': -1 });
+analysisSchema.index({ 'player_analytics.players.player_id': 1 });
 
 // Virtual for getting player count
-analysisSchema.virtual("playerCount").get(function () {
+analysisSchema.virtual('playerCount').get(function () {
   return this.player_analytics?.players?.length || 0;
 });
 
 // Virtual for getting total shots across all players
-analysisSchema.virtual("totalShots").get(function () {
+analysisSchema.virtual('totalShots').get(function () {
   if (!this.player_analytics?.players) return 0;
   return this.player_analytics.players.reduce((total, player) => {
     return total + (player.shots?.total_shots || 0);
@@ -516,7 +526,7 @@ analysisSchema.virtual("totalShots").get(function () {
 });
 
 // Virtual for getting analysis duration
-analysisSchema.virtual("analysisDuration").get(function () {
+analysisSchema.virtual('analysisDuration').get(function () {
   if (!this.metadata?.created_at || !this.metadata?.completed_at) return null;
   return (
     new Date(this.metadata.completed_at) - new Date(this.metadata.created_at)
@@ -526,24 +536,29 @@ analysisSchema.virtual("analysisDuration").get(function () {
 // Method to get player by index or player_id
 analysisSchema.methods.getPlayer = function (indexOrId) {
   if (!this.player_analytics?.players) return null;
-  
+
   // If it's a number, treat as index
   if (typeof indexOrId === 'number') {
     return this.player_analytics.players[indexOrId] || null;
   }
-  
+
   // If it's a string, search by player_id
   if (typeof indexOrId === 'string') {
-    return this.player_analytics.players.find(p => p.player_id === indexOrId) || null;
+    return (
+      this.player_analytics.players.find((p) => p.player_id === indexOrId) ||
+      null
+    );
   }
-  
+
   return null;
 };
 
 // Method to get player by player_id
 analysisSchema.methods.getPlayerById = function (playerId) {
   if (!this.player_analytics?.players) return null;
-  return this.player_analytics.players.find(p => p.player_id === playerId) || null;
+  return (
+    this.player_analytics.players.find((p) => p.player_id === playerId) || null
+  );
 };
 
 // Method to get highlights for a specific player
@@ -570,26 +585,26 @@ analysisSchema.statics.findByStatus = function (status) {
 analysisSchema.statics.findCompletedByUser = function (userId) {
   return this.find({
     created_by: userId,
-    status: "completed",
-  }).sort({ "metadata.completed_at": -1 });
+    status: 'completed',
+  }).sort({ 'metadata.completed_at': -1 });
 };
 
 // Pre-save middleware to update the updated_at field
-analysisSchema.pre("save", function (next) {
+analysisSchema.pre('save', function (next) {
   this.updated_at = new Date();
   next();
 });
 
 // Pre-save middleware to validate status transitions
-analysisSchema.pre("save", function (next) {
-  if (this.isModified("status")) {
+analysisSchema.pre('save', function (next) {
+  if (this.isModified('status')) {
     const validTransitions = {
-      pending: ["processing", "failed", "cancelled"],
-      processing: ["completed", "failed", "cancelled"],
-      progressing: ["completed", "failed", "cancelled"],
+      pending: ['processing', 'failed', 'cancelled'],
+      processing: ['completed', 'failed', 'cancelled'],
+      progressing: ['completed', 'failed', 'cancelled'],
       completed: [], // No transitions from completed
-      failed: ["pending"], // Can retry
-      cancelled: ["pending"], // Can restart
+      failed: ['pending'], // Can retry
+      cancelled: ['pending'], // Can restart
     };
 
     if (this.isNew) {
@@ -597,7 +612,7 @@ analysisSchema.pre("save", function (next) {
       return next();
     }
 
-    const currentStatus = this.get("status");
+    const currentStatus = this.get('status');
     const previousStatus = this.$locals.previousStatus;
 
     if (
@@ -616,10 +631,10 @@ analysisSchema.pre("save", function (next) {
 });
 
 // Post-init middleware to track previous status
-analysisSchema.post("init", function () {
+analysisSchema.post('init', function () {
   this.$locals.previousStatus = this.status;
 });
 
-const Analysis = mongoose.model("Analysis", analysisSchema);
+const Analysis = mongoose.model('Analysis', analysisSchema);
 
 export default Analysis;
