@@ -747,6 +747,7 @@ export const uploadVideoService = catchAsync(async (req, res, next) => {
     // Set processing status
     match.playerDetectionStatus = 'processing';
     match.playerDetectionStartedAt = new Date();
+    match.playerDetectionRetryCount = 0; // Reset retry count for new upload
     await match.save();
 
     console.log(

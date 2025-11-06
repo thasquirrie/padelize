@@ -908,6 +908,12 @@ class PlayerAnalyticsAggregator {
             avg_speed_kmh: {
               $avg: '$player_analytics.players.average_speed_kmh',
             },
+            avg_peak_speed_kmh: {
+              $avg: '$player_analytics.players.peak_speed_kmh',
+            },
+            max_peak_speed_kmh: {
+              $max: '$player_analytics.players.peak_speed_kmh',
+            },
             avg_total_distance_km: {
               $avg: '$player_analytics.players.total_distance_km',
             },
@@ -916,6 +922,25 @@ class PlayerAnalyticsAggregator {
             },
             avg_calories_burned: {
               $avg: '$player_analytics.players.calories_burned',
+            },
+
+            // Court positioning metrics
+            avg_net_dominance_percentage: {
+              $avg: '$player_analytics.players.net_dominance_percentage',
+            },
+            avg_dead_zone_presence_percentage: {
+              $avg: '$player_analytics.players.dead_zone_presence_percentage',
+            },
+            avg_baseline_play_percentage: {
+              $avg: '$player_analytics.players.baseline_play_percentage',
+            },
+
+            // Sprint burst metrics
+            total_sprint_bursts_sum: {
+              $sum: '$player_analytics.players.total_sprint_bursts',
+            },
+            avg_sprint_bursts_per_match: {
+              $avg: '$player_analytics.players.total_sprint_bursts',
             },
 
             // Sum and average shot statistics
@@ -999,11 +1024,34 @@ class PlayerAnalyticsAggregator {
             // Physical performance averages
             performance_averages: {
               speed_kmh: { $round: ['$avg_speed_kmh', 2] },
+              peak_speed_kmh: { $round: ['$avg_peak_speed_kmh', 2] },
+              max_peak_speed_kmh: { $round: ['$max_peak_speed_kmh', 2] },
               total_distance_km: { $round: ['$avg_total_distance_km', 4] },
               distance_from_center_km: {
                 $round: ['$avg_distance_from_center_km', 6],
               },
               calories_burned: { $round: ['$avg_calories_burned', 2] },
+            },
+
+            // Court positioning averages
+            positioning_averages: {
+              net_dominance_percentage: {
+                $round: ['$avg_net_dominance_percentage', 2],
+              },
+              dead_zone_presence_percentage: {
+                $round: ['$avg_dead_zone_presence_percentage', 2],
+              },
+              baseline_play_percentage: {
+                $round: ['$avg_baseline_play_percentage', 2],
+              },
+            },
+
+            // Sprint burst statistics
+            sprint_burst_stats: {
+              total_sprint_bursts: '$total_sprint_bursts_sum',
+              avg_sprint_bursts_per_match: {
+                $round: ['$avg_sprint_bursts_per_match', 2],
+              },
             },
 
             // Shot statistics - totals across all matches

@@ -1,26 +1,30 @@
 # New API Format Migration
 
 ## Overview
+
 Updated the system to handle the new AI server API response format with changed units and new fields.
 
 ## Changes Made
 
 ### 1. Unit Changes
+
 The AI server API has changed the units for some metrics:
 
-| Metric | Old Format | New Format |
-|--------|-----------|-----------|
-| Distance | Miles | **Meters** |
+| Metric          | Old Format     | New Format              |
+| --------------- | -------------- | ----------------------- |
+| Distance        | Miles          | **Meters**              |
 | Speed (Average) | Miles per Hour | **Kilometers per Hour** |
-| Speed (Peak) | Miles per Hour | **Kilometers per Hour** |
+| Speed (Peak)    | Miles per Hour | **Kilometers per Hour** |
 
 ### 2. New Fields Added
 
 #### Player Schema (`src/models/Analysis.js`)
+
 - **`total_sprint_bursts`**: Number of sprint bursts detected (Integer)
 - **`player_heatmap`**: URL to the player's heatmap image (String)
 
 #### API Response Format
+
 ```json
 {
   "status": "success",
@@ -45,6 +49,7 @@ The AI server API has changed the units for some metrics:
 ### 3. Files Modified
 
 #### `src/utils/analysisFormatter.js`
+
 - Updated `transformNewAnalysisResults()` function to:
   - Parse new unit format (Meters → km, Kilometers per Hour → km/h)
   - Extract `Total Sprint Bursts` field
@@ -53,22 +58,35 @@ The AI server API has changed the units for some metrics:
   - Add helper function `parseValueWithUnit()` for safe numeric parsing
 
 #### `src/models/Analysis.js`
+
 - Added `total_sprint_bursts` field to player schema (optional, default: 0)
 - Made `player_heatmap` field optional
 
+#### `src/utils/subscriptionUtils.js`
+
+- Updated `filterAnalysisResultsBySubscription()` to include new fields:
+  - `total_sprint_bursts` is now passed through the filter
+  - `player_heatmap` is now passed through the filter
+  - Both fields available to all subscription tiers
+
 ### 4. Backward Compatibility
+
 The transformation function maintains backward compatibility:
+
 - Old format responses are passed through unchanged
 - New format is detected by checking for `results` object and `job_id`
 - Original response is preserved in `_original_new_format` field
 
 ### 5. Testing
+
 Created `test-new-api-format.js` to verify the transformation:
+
 ```bash
 node test-new-api-format.js
 ```
 
 Expected output shows:
+
 - ✅ Successful transformation
 - Correct unit conversions (Meters → km)
 - All new fields properly extracted
@@ -86,14 +104,17 @@ The transformation happens automatically in the analysis pipeline:
 ## Verification
 
 To test with your own data:
+
 ```javascript
 import { transformNewAnalysisResults } from './src/utils/analysisFormatter.js';
 
 const apiResponse = {
-  status: "success",
-  job_id: "some-uuid",
-  analysis_status: "completed",
-  results: { /* your data */ }
+  status: 'success',
+  job_id: 'some-uuid',
+  analysis_status: 'completed',
+  results: {
+    /* your data */
+  },
 };
 
 const transformed = transformNewAnalysisResults(apiResponse);

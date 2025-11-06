@@ -1,6 +1,6 @@
-import Analysis from "../models/Analysis.js";
-import AppError from "./appError.js";
-import { createOne } from "../factory/repo.js";
+import Analysis from '../models/Analysis.js';
+import AppError from './appError.js';
+import { createOne } from '../factory/repo.js';
 
 // Formatter to convert API response to MongoDB document
 const formatAnalysisResponse = (apiResponse, userId) => {
@@ -78,17 +78,32 @@ const formatAnalysisResponse = (apiResponse, userId) => {
         player.baseline_play_percentage = 0;
       }
 
+      // Ensure new fields from API update are present with defaults if missing
+      if (
+        player.total_sprint_bursts === undefined ||
+        player.total_sprint_bursts === null
+      ) {
+        player.total_sprint_bursts = 0;
+      }
+
+      if (
+        player.player_heatmap === undefined ||
+        player.player_heatmap === null
+      ) {
+        player.player_heatmap = null;
+      }
+
       // Handle shot_events - ensure they are properly formatted arrays
       if (player.shot_events) {
         if (Array.isArray(player.shot_events)) {
           // Already an array, ensure each event has proper structure
           player.shot_events = player.shot_events
             .map((event) => {
-              if (typeof event === "object" && event !== null) {
+              if (typeof event === 'object' && event !== null) {
                 return event;
               } else {
                 // If it's not an object, skip it or create a minimal structure
-                console.warn("Invalid shot event format, skipping:", event);
+                console.warn('Invalid shot event format, skipping:', event);
                 return null;
               }
             })
@@ -96,7 +111,7 @@ const formatAnalysisResponse = (apiResponse, userId) => {
         } else {
           // If it's not an array, wrap it or clear it
           console.warn(
-            "shot_events is not an array, clearing:",
+            'shot_events is not an array, clearing:',
             player.shot_events
           );
           player.shot_events = [];
@@ -115,11 +130,11 @@ const formatAnalysisResponse = (apiResponse, userId) => {
       formatted.player_analytics.shot_events =
         formatted.player_analytics.shot_events
           .map((event) => {
-            if (typeof event === "object" && event !== null) {
+            if (typeof event === 'object' && event !== null) {
               return event;
             } else {
               console.warn(
-                "Invalid top-level shot event format, skipping:",
+                'Invalid top-level shot event format, skipping:',
                 event
               );
               return null;
@@ -128,7 +143,7 @@ const formatAnalysisResponse = (apiResponse, userId) => {
           .filter((event) => event !== null);
     } else {
       console.warn(
-        "Top-level shot_events is not an array, clearing:",
+        'Top-level shot_events is not an array, clearing:',
         formatted.player_analytics.shot_events
       );
       formatted.player_analytics.shot_events = [];
@@ -149,7 +164,7 @@ const formatAnalysisResponse = (apiResponse, userId) => {
   if (formatted.files) {
     // Convert null strings to actual null
     Object.keys(formatted.files).forEach((key) => {
-      if (formatted.files[key] === null || formatted.files[key] === "null") {
+      if (formatted.files[key] === null || formatted.files[key] === 'null') {
         formatted.files[key] = null;
       }
     });
@@ -179,11 +194,11 @@ const createAnalysisFromResponse = async (apiResponse, userId) => {
 
     // Validate required fields
     if (!formattedData.match_id) {
-      throw new AppError("match_id is required");
+      throw new AppError('match_id is required');
     }
 
     if (!formattedData.status) {
-      throw new AppError("status is required");
+      throw new AppError('status is required');
     }
 
     // Create the analysis document
@@ -191,7 +206,7 @@ const createAnalysisFromResponse = async (apiResponse, userId) => {
 
     return analysis;
   } catch (error) {
-    console.error("Error creating analysis:", error);
+    console.error('Error creating analysis:', error);
     throw new AppError(error, 500);
   }
 };
@@ -202,7 +217,7 @@ const createAnalysisWithHelper = async (createOne, apiResponse, userId) => {
     const formattedData = formatAnalysisResponse(apiResponse, userId);
     return await createOne(Analysis, formattedData);
   } catch (error) {
-    console.error("Error creating analysis with helper:", error);
+    console.error('Error creating analysis with helper:', error);
     throw error;
   }
 };
@@ -212,11 +227,11 @@ const validateApiResponse = (response) => {
   const errors = [];
 
   if (!response.match_id) {
-    errors.push("match_id is missing");
+    errors.push('match_id is missing');
   }
 
   if (!response.status) {
-    errors.push("status is missing");
+    errors.push('status is missing');
   }
 
   // if (response.status === 'completed') {
@@ -233,7 +248,7 @@ const validateApiResponse = (response) => {
   // }
   // }
 
-  console.log("Validation errors:", errors);
+  console.log('Validation errors:', errors);
 
   return errors;
 };
@@ -241,7 +256,7 @@ const validateApiResponse = (response) => {
 // Complete workflow function
 const processAnalysisResponse = async (apiResponse, userId) => {
   console.log(
-    "Processing analysis response...",
+    'Processing analysis response...',
     apiResponse,
     apiResponse.player_analytics
   );
@@ -250,22 +265,22 @@ const processAnalysisResponse = async (apiResponse, userId) => {
     const validationErrors = validateApiResponse(apiResponse);
     if (validationErrors.length > 0) {
       throw new AppError(
-        `API response validation failed: ${validationErrors.join(", ")}`
+        `API response validation failed: ${validationErrors.join(', ')}`
       );
     }
 
     // Step 2: Format the response
     const formattedData = formatAnalysisResponse(apiResponse, userId);
 
-    console.log("Formatted data:", formattedData);
+    console.log('Formatted data:', formattedData);
 
     // Step 3: Create the document
     const analysis = await createOne(Analysis, formattedData);
 
-    console.log("Analysis created successfully:", analysis.match_id);
+    console.log('Analysis created successfully:', analysis.match_id);
     return analysis;
   } catch (error) {
-    console.error("Error processing analysis response:", error);
+    console.error('Error processing analysis response:', error);
     throw error;
   }
 };
@@ -275,24 +290,24 @@ const transformNewAnalysisResults = (newFormatResponse) => {
   const { status, job_id, analysis_status, results } = newFormatResponse;
 
   // If it's not the new format, return as is
-  if (!results || typeof results !== "object" || !job_id) {
+  if (!results || typeof results !== 'object' || !job_id) {
     return newFormatResponse;
   }
 
   // Helper function to safely parse numeric values with units
   const parseValueWithUnit = (value, unit) => {
     if (!value) return 0;
-    const numStr = value.toString().replace(unit, "").trim();
+    const numStr = value.toString().replace(unit, '').trim();
     return parseFloat(numStr) || 0;
   };
 
   // Convert numbered player results to player analytics format
   const players = [];
   const playerColors = [
-    [255, 0, 0],    // Red for player 'a'
-    [0, 0, 255],    // Blue for player 'b'
-    [0, 255, 0],    // Green for player 'c'
-    [255, 165, 0],  // Orange for player 'd'
+    [255, 0, 0], // Red for player 'a'
+    [0, 0, 255], // Blue for player 'b'
+    [0, 255, 0], // Green for player 'c'
+    [255, 165, 0], // Orange for player 'd'
   ];
 
   Object.keys(results).forEach((playerKey, index) => {
@@ -303,29 +318,45 @@ const transformNewAnalysisResults = (newFormatResponse) => {
     const player = {
       player_id: playerKey, // Store the AI server key (a, b, c, d, etc.)
       color: playerColors[index] || [128, 128, 128], // Use default colors or gray
-      
+
       // Distance is now in Meters (was Miles before)
-      total_distance_km: parseValueWithUnit(playerData["Distance Covered"], "Meters") / 1000,
-      
+      total_distance_km:
+        parseValueWithUnit(playerData['Distance Covered'], 'Meters') / 1000,
+
       // Speed is now in Kilometers per Hour (was Miles per Hour before)
-      average_speed_kmh: parseValueWithUnit(playerData["Average Speed"], "Kilometers per Hour"),
-      peak_speed_kmh: parseValueWithUnit(playerData["Peak Speed"], "Kilometers per Hour"),
-      
+      average_speed_kmh: parseValueWithUnit(
+        playerData['Average Speed'],
+        'Kilometers per Hour'
+      ),
+      peak_speed_kmh: parseValueWithUnit(
+        playerData['Peak Speed'],
+        'Kilometers per Hour'
+      ),
+
       // Percentages remain the same
-      net_dominance_percentage: parseValueWithUnit(playerData["Net Dominance"], "%"),
-      dead_zone_presence_percentage: parseValueWithUnit(playerData["Dead Zone Presence"], "%"),
-      baseline_play_percentage: parseValueWithUnit(playerData["Baseline Play"], "%"),
-      
+      net_dominance_percentage: parseValueWithUnit(
+        playerData['Net Dominance'],
+        '%'
+      ),
+      dead_zone_presence_percentage: parseValueWithUnit(
+        playerData['Dead Zone Presence'],
+        '%'
+      ),
+      baseline_play_percentage: parseValueWithUnit(
+        playerData['Baseline Play'],
+        '%'
+      ),
+
       // New field: Total Sprint Bursts
-      total_sprint_bursts: parseInt(playerData["Total Sprint Bursts"]) || 0,
-      
+      total_sprint_bursts: parseInt(playerData['Total Sprint Bursts']) || 0,
+
       // Player heatmap URL
-      player_heatmap: playerData["Player Heatmap"] || null,
-      
+      player_heatmap: playerData['Player Heatmap'] || null,
+
       // Fields not provided by new API - set defaults
       average_distance_from_center_km: 0,
       calories_burned: 0,
-      
+
       // Shots data - not provided in new format yet
       shots: {
         total_shots: 0,
@@ -376,7 +407,7 @@ const transformNewAnalysisResults = (newFormatResponse) => {
     metadata: {
       created_at: new Date(),
       completed_at: new Date(),
-      storage: "s3",
+      storage: 's3',
     },
     // Keep original new format data for reference
     _original_new_format: newFormatResponse,

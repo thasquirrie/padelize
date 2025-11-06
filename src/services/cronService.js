@@ -110,6 +110,21 @@ class AnalysisStatusCronJob {
       return;
     }
 
+    // Check retry count and fail if exceeded
+    const retryCount = match.playerDetectionRetryCount || 0;
+    const MAX_RETRIES = 10; // 10 retries * 3 minutes = 30 minutes max
+
+    if (retryCount >= MAX_RETRIES) {
+      console.log(
+        `Player detection ${matchId} exceeded max retries (${MAX_RETRIES})`
+      );
+      await this.handlePlayerDetectionFailure(
+        match,
+        `Failed after ${MAX_RETRIES} retry attempts`
+      );
+      return;
+    }
+
     const lockAcquired = await this.addProcessingLock(lockKey);
     if (!lockAcquired) {
       console.log(`Failed to acquire lock for player detection ${matchId}`);
@@ -117,18 +132,56 @@ class AnalysisStatusCronJob {
     }
 
     try {
-      console.log(`Checking player detection for match: ${matchId}`);
+      console.log(
+        `Checking player detection for match: ${matchId} (attempt ${retryCount + 1}/${MAX_RETRIES})`
+      );
 
       const fetchPlayerJSON = await VideoAnalysisService.fetchPlayers({
         video,
       });
+      
+      // Check if response is ok before parsing
+      if (!fetchPlayerJSON.ok) {
+        const errorText = await fetchPlayerJSON.text();
+        throw new Error(
+          `API returned ${fetchPlayerJSON.status}: ${errorText}`
+        );
+      }
+
       const fetchPlayerResult = await fetchPlayerJSON.json();
+
+      // Check if the result indicates processing is still ongoing
+      if (
+        fetchPlayerResult.status === 'processing' ||
+        fetchPlayerResult.message === 'still processing'
+      ) {
+        console.log(
+          `Player detection ${matchId} still processing on Python API, will check again later`
+        );
+        match.playerDetectionRetryCount = retryCount + 1;
+        await match.save();
+        return;
+      }
+
+      // Check for error responses from API
+      if (
+        fetchPlayerResult.status === 'error' ||
+        fetchPlayerResult.error ||
+        fetchPlayerResult[0] === 'not found'
+      ) {
+        throw new Error(
+          fetchPlayerResult.error ||
+            fetchPlayerResult.message ||
+            'Player detection failed'
+        );
+      }
 
       match.players = fetchPlayerResult.players || [];
       match.fetchedPlayerData =
         fetchPlayerResult[0] != 'not found' && match.players.length > 0;
       match.playerDetectionStatus = 'completed';
       match.playerDetectionCompletedAt = new Date();
+      match.playerDetectionRetryCount = 0; // Reset counter on success
 
       await match.save();
 
@@ -143,9 +196,19 @@ class AnalysisStatusCronJob {
       );
     } catch (error) {
       console.error(`Error checking player detection ${matchId}:`, error);
+
+      // Increment retry count
+      match.playerDetectionRetryCount = retryCount + 1;
+      await match.save();
+
       console.log(
-        `Will retry player detection for ${matchId} on next cron run`
+        `Will retry player detection for ${matchId} on next cron run (${match.playerDetectionRetryCount}/${MAX_RETRIES})`
       );
+
+      // If this was the last retry, mark as failed
+      if (match.playerDetectionRetryCount >= MAX_RETRIES) {
+        await this.handlePlayerDetectionFailure(match, error.message);
+      }
     } finally {
       await this.removeProcessingLock(lockKey);
     }
@@ -167,6 +230,26 @@ class AnalysisStatusCronJob {
       console.log(`Player detection timeout handled for match ${match._id}`);
     } catch (error) {
       console.error(`Error handling player detection timeout:`, error);
+    }
+  }
+
+  async handlePlayerDetectionFailure(match, errorMessage) {
+    try {
+      match.playerDetectionStatus = 'failed';
+      match.playerDetectionError = errorMessage;
+      await match.save();
+
+      await matchNotificationService.notifyPlayerDetectionFailed(
+        match.creator,
+        match,
+        `Player detection failed: ${errorMessage}`
+      );
+
+      console.log(
+        `Player detection failure handled for match ${match._id}: ${errorMessage}`
+      );
+    } catch (error) {
+      console.error(`Error handling player detection failure:`, error);
     }
   }
 

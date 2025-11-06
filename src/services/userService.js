@@ -22,7 +22,19 @@ export const getUserService = catchAsync(async (req, res, next) => {
 });
 
 export const getUsersService = catchAsync(async (req, res, next) => {
-  const users = await getAll(User, req.query);
+  const { searchTerm, ...filterParams } = req.query;
+
+  // Define searchable fields for users
+  const searchFields = ['fullName', 'email', 'phone', 'description'];
+
+  // Configure search options
+  const searchOptions = {
+    searchFields,
+    searchTerm: searchTerm || '',
+  };
+
+  // Get users with search functionality (pass filterParams to maintain other query filters)
+  const users = await getAll(User, filterParams, searchOptions);
 
   res.status(200).json({
     status: 'success',

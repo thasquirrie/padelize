@@ -87,6 +87,10 @@ const matchSchema = new Schema(
     playerDetectionStartedAt: Date,
     playerDetectionCompletedAt: Date,
     playerDetectionError: String,
+    playerDetectionRetryCount: {
+      type: Number,
+      default: 0,
+    },
     // startTime: {
     //   type: Date,
     //   required: true,

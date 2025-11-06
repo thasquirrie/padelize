@@ -1,6 +1,6 @@
-import { getUserPlanFeatures } from "../middleware/subscriptionMiddleware.js";
-import Analysis from "../models/Analysis.js";
-import AppError from "../utils/appError.js";
+import { getUserPlanFeatures } from '../middleware/subscriptionMiddleware.js';
+import Analysis from '../models/Analysis.js';
+import AppError from '../utils/appError.js';
 
 /**
  * Check if user can perform a new match analysis based on their subscription
@@ -155,7 +155,7 @@ export const filterAnalysisResultsBySubscription = (analysis, creator) => {
                 // Free plan: Only include forehand/backhand shot events
                 filteredPlayer.shot_events = player.shot_events.filter(
                   (event) =>
-                    ["forehand", "backhand"].includes(event.type?.toLowerCase())
+                    ['forehand', 'backhand'].includes(event.type?.toLowerCase())
                 );
               }
             }
@@ -178,6 +178,14 @@ export const filterAnalysisResultsBySubscription = (analysis, creator) => {
             if (player.dead_zone_presence_percentage !== undefined) {
               filteredPlayer.dead_zone_presence_percentage =
                 player.dead_zone_presence_percentage;
+            }
+
+            // Include new API fields
+            if (player.total_sprint_bursts !== undefined) {
+              filteredPlayer.total_sprint_bursts = player.total_sprint_bursts;
+            }
+            if (player.player_heatmap !== undefined) {
+              filteredPlayer.player_heatmap = player.player_heatmap;
             }
           }
           // If no shot classification access, completely exclude shot-related data
@@ -222,7 +230,7 @@ export const filterAnalysisResultsBySubscription = (analysis, creator) => {
         // Free plan: Only include forehand/backhand shot events
         result.player_analytics.shot_events =
           analysis.player_analytics.shot_events.filter((event) =>
-            ["forehand", "backhand"].includes(event.type?.toLowerCase())
+            ['forehand', 'backhand'].includes(event.type?.toLowerCase())
           );
       }
     }
@@ -287,13 +295,13 @@ export const filterAnalysisResultsBySubscription = (analysis, creator) => {
  */
 export const getProcessingMessage = (priority) => {
   switch (priority) {
-    case "fastest":
-      return "Your match is being processed with priority (MAX plan) - expect results in 15-30 minutes";
-    case "fast":
-      return "Your match is being processed with fast priority (PRO plan) - expect results within 1 hour";
-    case "standard":
+    case 'fastest':
+      return 'Your match is being processed with priority (MAX plan) - expect results in 15-30 minutes';
+    case 'fast':
+      return 'Your match is being processed with fast priority (PRO plan) - expect results within 1 hour';
+    case 'standard':
     default:
-      return "Your match is being processed - expect results in 2-4 hours";
+      return 'Your match is being processed - expect results in 2-4 hours';
   }
 };
 
