@@ -444,7 +444,10 @@ export const getAllMatchesService = catchAsync(async (req, res, next) => {
               $cond: {
                 if: { $ne: ['$$analysisDoc', null] },
                 then: {
-                  $arrayElemAt: ['$$analysisDoc.player_analytics.players', 0],
+                  $arrayElemAt: [
+                    '$$analysisDoc.player_analytics.players',
+                    { $ifNull: ['$creatorPlayerIndex', 0] },
+                  ],
                 },
                 else: null,
               },
@@ -504,7 +507,10 @@ export const getUserMatchesService = catchAsync(async (req, res, next) => {
               $cond: {
                 if: { $ne: ['$$analysisDoc', null] },
                 then: {
-                  $arrayElemAt: ['$$analysisDoc.player_analytics.players', 0],
+                  $arrayElemAt: [
+                    '$$analysisDoc.player_analytics.players',
+                    { $ifNull: ['$creatorPlayerIndex', 0] },
+                  ],
                 },
                 else: null,
               },
@@ -890,6 +896,33 @@ export const analyzeVideosService = catchAsync(async (req, res, next) => {
   }
 
   match.players = req.body.playersData;
+  match.formattedPlayerData = true;
+
+  // Set creator player index with fallback strategy:
+  // 1. Use index sent by mobile (most reliable - mobile knows which player is creator)
+  // 2. Try to find creator by matching player_id with match.creator
+  // 3. Default to 0 (backward compatible)
+
+  if (
+    req.body.creatorPlayerIndex !== undefined &&
+    req.body.creatorPlayerIndex !== null &&
+    req.body.creatorPlayerIndex >= 0
+  ) {
+    // Mobile explicitly told us which player is the creator
+    match.creatorPlayerIndex = req.body.creatorPlayerIndex;
+  } else {
+    // Fallback: Try to find creator by matching IDs
+    const creatorId = match.creator.toString();
+    const creatorIndex = req.body.playersData.findIndex(
+      (player) => player.player_id && player.player_id.toString() === creatorId
+    );
+
+    if (creatorIndex !== -1) {
+      match.creatorPlayerIndex = creatorIndex;
+    }
+    // If still not found, creatorPlayerIndex remains at default 0
+  }
+
   await match.save();
 
   try {
