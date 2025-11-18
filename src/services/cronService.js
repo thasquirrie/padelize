@@ -133,19 +133,19 @@ class AnalysisStatusCronJob {
 
     try {
       console.log(
-        `Checking player detection for match: ${matchId} (attempt ${retryCount + 1}/${MAX_RETRIES})`
+        `Checking player detection for match: ${matchId} (attempt ${
+          retryCount + 1
+        }/${MAX_RETRIES})`
       );
 
       const fetchPlayerJSON = await VideoAnalysisService.fetchPlayers({
         video,
       });
-      
+
       // Check if response is ok before parsing
       if (!fetchPlayerJSON.ok) {
         const errorText = await fetchPlayerJSON.text();
-        throw new Error(
-          `API returned ${fetchPlayerJSON.status}: ${errorText}`
-        );
+        throw new Error(`API returned ${fetchPlayerJSON.status}: ${errorText}`);
       }
 
       const fetchPlayerResult = await fetchPlayerJSON.json();

@@ -228,6 +228,38 @@ export const getMatchService = catchAsync(async (req, res, next) => {
   // 2. Cron job (background processing and retry)
   // Just return current status - no synchronous fetching
 
+  // Reset retry count if max retries reached and match is viewed
+  // This allows cron to retry when AI server comes back online
+  const MAX_RETRIES = 10;
+  if (
+    match.playerDetectionStatus === 'processing' &&
+    match.playerDetectionRetryCount >= MAX_RETRIES
+  ) {
+    console.log(
+      `Resetting retry count for match ${match._id} (was at ${match.playerDetectionRetryCount}/${MAX_RETRIES}) due to match view`
+    );
+    match.playerDetectionRetryCount = 0;
+    match.playerDetectionStartedAt = new Date(); // Reset start time too
+    await match.save();
+  }
+
+  // Reset failed player detection back to processing when viewed
+  // This gives it another chance when AI server comes back online
+  if (
+    match.playerDetectionStatus === 'failed' &&
+    match.playerDetectionRetryCount >= MAX_RETRIES &&
+    match.video // Only if video exists
+  ) {
+    console.log(
+      `Resetting failed player detection for match ${match._id} back to processing due to match view`
+    );
+    match.playerDetectionStatus = 'processing';
+    match.playerDetectionRetryCount = 0;
+    match.playerDetectionStartedAt = new Date();
+    match.playerDetectionError = null;
+    await match.save();
+  }
+
   const quotaCheck = await checkUserAnalysisQuota(req.user);
 
   // Only auto-start analysis if player detection is completed
@@ -282,6 +314,16 @@ export const getMatchService = catchAsync(async (req, res, next) => {
       );
       console.error('Error restarting analysis:', analysisError);
     }
+  }
+
+  // Reset 'not_found' analysis status when viewed (happens when AI server was down)
+  // This allows the analysis to be restarted when server comes back online
+  if (match.analysisStatus === 'not_found' && match.video) {
+    console.log(
+      `Resetting not_found analysis for match ${match._id} due to match view`
+    );
+    match.analysisStatus = 'failed'; // Set to failed so it can be restarted
+    await match.save();
   }
 
   if (

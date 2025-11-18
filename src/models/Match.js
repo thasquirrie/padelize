@@ -28,16 +28,8 @@ const matchSchema = new Schema(
             player: {
               type: Schema.Types.ObjectId,
               ref: 'User',
-              // Not required to support guest players
             },
-            name: {
-              type: String,
-              // Required if player is not provided (guest player)
-            },
-            isGuest: {
-              type: Boolean,
-              default: false,
-            },
+            name: String, // For display purposes or non-registered players,
             color: String,
           },
         ],
@@ -86,11 +78,6 @@ const matchSchema = new Schema(
     players: {
       type: Schema.Types.Mixed, // Array of player details { id, name, position, team }
       default: [],
-    },
-    creatorPlayerIndex: {
-      type: Number,
-      default: 0,
-      min: 0,
     },
     playerDetectionStatus: {
       type: String,
@@ -147,19 +134,6 @@ matchSchema.pre('save', function (next) {
       );
       return next(error);
     }
-
-    // Validate that each player has either a player ObjectId OR a name (for guests)
-    for (const playerObj of team.players) {
-      if (!playerObj.player && !playerObj.name) {
-        const error = new Error(
-          'Each player must have either a registered user (player) or a name (for guest players)'
-        );
-        return next(error);
-      }
-
-      // Set isGuest flag based on whether player ObjectId exists
-      playerObj.isGuest = !playerObj.player;
-    }
   }
 
   next();
@@ -168,13 +142,11 @@ matchSchema.pre('save', function (next) {
 // Virtual to easily find the creator's team
 matchSchema.virtual('creatorTeam').get(function () {
   return this.teams.find((team) =>
-    team.players.some((playerObj) => {
-      // Check if player exists and matches creator
-      if (playerObj.player) {
-        return playerObj.player.toString() === this.creator.toString();
-      }
-      return false;
-    })
+    team.players.some(
+      (playerObj) =>
+        playerObj.player &&
+        playerObj.player.toString() === this.creator.toString()
+    )
   );
 });
 
@@ -182,43 +154,12 @@ matchSchema.virtual('creatorTeam').get(function () {
 matchSchema.virtual('opponentTeam').get(function () {
   return this.teams.find(
     (team) =>
-      !team.players.some((playerObj) => {
-        // Check if player exists and matches creator
-        if (playerObj.player) {
-          return playerObj.player.toString() === this.creator.toString();
-        }
-        return false;
-      })
+      !team.players.some(
+        (playerObj) =>
+          playerObj.player &&
+          playerObj.player.toString() === this.creator.toString()
+      )
   );
-});
-
-// Virtual to get all registered players (excluding guests)
-matchSchema.virtual('registeredPlayers').get(function () {
-  const players = [];
-  this.teams.forEach((team) => {
-    team.players.forEach((playerObj) => {
-      if (playerObj.player) {
-        players.push(playerObj.player);
-      }
-    });
-  });
-  return players;
-});
-
-// Virtual to get all guest players
-matchSchema.virtual('guestPlayers').get(function () {
-  const guests = [];
-  this.teams.forEach((team) => {
-    team.players.forEach((playerObj) => {
-      if (playerObj.isGuest || (!playerObj.player && playerObj.name)) {
-        guests.push({
-          name: playerObj.name,
-          color: playerObj.color,
-        });
-      }
-    });
-  });
-  return guests;
 });
 
 const Match = model('Match', matchSchema);
