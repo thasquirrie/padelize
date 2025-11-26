@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import catchAsync from '../utils/catchAsync.js';
 import AppError from '../utils/appError.js';
 import Analysis from '../models/Analysis.js';
+import CoachingInsight from '../models/CoachingInsight.js';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -147,14 +148,29 @@ CRITICAL RULES:
 
     const insights = JSON.parse(response.choices[0].message.content);
 
+    // Calculate cost (gpt-4o-mini pricing as of 2024)
+    // Input: $0.150 per 1M tokens, Output: $0.600 per 1M tokens
+    const cost_usd =
+      (response.usage.prompt_tokens * 0.15) / 1_000_000 +
+      (response.usage.completion_tokens * 0.6) / 1_000_000;
+
     // Log token usage for monitoring
     console.log('OpenAI Coaching Analysis - Token Usage:', {
       prompt: response.usage.prompt_tokens,
       completion: response.usage.completion_tokens,
       total: response.usage.total_tokens,
+      cost_usd: cost_usd.toFixed(6),
     });
 
-    return insights;
+    return {
+      insights,
+      usage: {
+        prompt: response.usage.prompt_tokens,
+        completion: response.usage.completion_tokens,
+        total: response.usage.total_tokens,
+      },
+      cost_usd,
+    };
   } catch (error) {
     console.error('Error generating coaching insights:', error);
     throw new AppError('Failed to generate coaching insights', 500);
@@ -165,11 +181,13 @@ CRITICAL RULES:
  * Generate coaching insights for a specific analysis
  * @param {String} analysisId - MongoDB Analysis ID
  * @param {String} playerId - Player ID (optional, defaults to creator)
+ * @param {Boolean} forceRegenerate - Force regeneration even if cached (default: false)
  * @returns {Object} - Coaching insights
  */
 export const getCoachingInsightsForAnalysis = async (
   analysisId,
-  playerId = null
+  playerId = null,
+  forceRegenerate = false
 ) => {
   // Fetch the analysis
   const analysis = await Analysis.findById(analysisId);
@@ -197,6 +215,32 @@ export const getCoachingInsightsForAnalysis = async (
     throw new AppError('Player data not found', 404);
   }
 
+  const actualPlayerId = playerData.player_id;
+
+  // Check if insights already exist in database (unless force regenerate)
+  if (!forceRegenerate) {
+    const existingInsight = await CoachingInsight.findOne({
+      analysis: analysisId,
+      player_id: actualPlayerId,
+    });
+
+    if (existingInsight) {
+      console.log(
+        `✅ Using cached coaching insights for analysis ${analysisId}, player ${actualPlayerId}`
+      );
+      return {
+        analysis_id: analysisId,
+        player_id: actualPlayerId,
+        metrics: existingInsight.metrics,
+        insights: existingInsight.insights,
+        generated_at: existingInsight.createdAt,
+        cached: true,
+        tokens_used: existingInsight.tokens_used,
+        cost_usd: existingInsight.cost_usd,
+      };
+    }
+  }
+
   // Extract metrics
   const playerMetrics = {
     distance_km: playerData.total_distance_km || 0,
@@ -209,15 +253,42 @@ export const getCoachingInsightsForAnalysis = async (
     duration: analysis.player_analytics.metadata?.duration_minutes || null,
   };
 
-  // Generate insights
-  const insights = await generateCoachingInsights(playerMetrics);
+  console.log(
+    `🔄 Generating new coaching insights for analysis ${analysisId}, player ${actualPlayerId}`
+  );
+
+  // Generate insights using OpenAI
+  const result = await generateCoachingInsights(playerMetrics);
+
+  // Save insights to database for future use
+  try {
+    const coachingInsight = await CoachingInsight.create({
+      analysis: analysisId,
+      player_id: actualPlayerId,
+      metrics: playerMetrics,
+      insights: result.insights,
+      model_used: 'gpt-4o-mini',
+      tokens_used: result.usage || {},
+      cost_usd: result.cost_usd || 0,
+    });
+
+    console.log(
+      `💾 Saved coaching insights to database (ID: ${coachingInsight._id})`
+    );
+  } catch (saveError) {
+    console.error('Failed to save coaching insights:', saveError);
+    // Don't throw - return the generated insights even if save fails
+  }
 
   return {
     analysis_id: analysisId,
-    player_id: playerData.player_id,
+    player_id: actualPlayerId,
     metrics: playerMetrics,
-    insights: insights,
+    insights: result.insights,
     generated_at: new Date(),
+    cached: false,
+    tokens_used: result.usage || {},
+    cost_usd: result.cost_usd || 0,
   };
 };
 
@@ -227,9 +298,16 @@ export const getCoachingInsightsForAnalysis = async (
 export const generateCoachingInsightsService = catchAsync(
   async (req, res, next) => {
     const { analysisId } = req.params;
-    const { playerId } = req.query;
+    const { playerId, forceRegenerate } = req.query;
 
-    const result = await getCoachingInsightsForAnalysis(analysisId, playerId);
+    // Convert forceRegenerate to boolean
+    const shouldRegenerate = forceRegenerate === 'true';
+
+    const result = await getCoachingInsightsForAnalysis(
+      analysisId,
+      playerId,
+      shouldRegenerate
+    );
 
     res.status(200).json({
       status: 'success',

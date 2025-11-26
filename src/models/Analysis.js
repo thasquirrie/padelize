@@ -397,23 +397,19 @@ const filesSchema = new mongoose.Schema(
       default: null,
     },
     highlights: {
-      type: Map,
-      of: [String],
-      required: true,
+      type: [String],
+      default: [],
       // validate: {
-      //   validator: function (highlights) {
-      //     // Validate that all URLs in highlights are valid
-      //     for (const [key, urls] of highlights) {
-      //       if (!Array.isArray(urls)) return false;
-      //       for (const url of urls) {
-      //         try {
-      //           new URL(url);
-      //         } catch {
-      //           return false;
-      //         }
+      //   validator: function (urls) {
+      //     // Validate that all URLs are valid
+      //     return urls.every(url => {
+      //       try {
+      //         new URL(url);
+      //         return true;
+      //       } catch {
+      //         return false;
       //       }
-      //     }
-      //     return true;
+      //     });
       //   },
       //   message: 'All highlight URLs must be valid URLs',
       // },
@@ -561,19 +557,9 @@ analysisSchema.methods.getPlayerById = function (playerId) {
   );
 };
 
-// Method to get highlights for a specific player
-analysisSchema.methods.getPlayerHighlights = function (playerIndex) {
-  return this.files?.highlights?.get(playerIndex.toString()) || [];
-};
-
 // Method to get all highlight URLs
 analysisSchema.methods.getAllHighlights = function () {
-  if (!this.files?.highlights) return [];
-  const allHighlights = [];
-  for (const [playerIndex, urls] of this.files.highlights) {
-    allHighlights.push(...urls);
-  }
-  return allHighlights;
+  return this.files?.highlights || [];
 };
 
 // Static method to find analyses by status

@@ -346,6 +346,8 @@ class AnalysisStatusCronJob {
         analysisId
       );
 
+      console.log(JSON.stringify(rawStatus, null, 2).bold.green);
+
       const status = rawStatus.analysis_status
         ? {
             ...rawStatus,
@@ -410,8 +412,32 @@ class AnalysisStatusCronJob {
     try {
       console.log(`Analysis ${matchId} completed, fetching results...`);
 
+      console.log(
+        '🔍 handleCompletedAnalysis - status object keys:',
+        Object.keys(status)
+      );
+      console.log(
+        '🔍 handleCompletedAnalysis - has results:',
+        'results' in status
+      );
+      console.log(
+        '🔍 handleCompletedAnalysis - results.all_clips:',
+        status.results?.all_clips
+      );
+
       let results = transformNewAnalysisResults(status);
-      results = { ...results, match_id: matchId };
+      
+      // Don't use spread operator - it destroys the Map in files.highlights
+      // Instead, directly add the match_id property
+      results.match_id = matchId;
+
+      createLogger.info(
+        `Analysis ${analysisId} completed with results: ${JSON.stringify(
+          results,
+          null,
+          2
+        )}`.bold.green
+      );
 
       await Match.findByIdAndUpdate(matchId, {
         analysisStatus: 'completed',

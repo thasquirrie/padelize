@@ -330,6 +330,7 @@ export const getMatchService = catchAsync(async (req, res, next) => {
     match.analysisStatus === 'processing' ||
     match.analysisStatus === 'pending'
   ) {
+    console.log('We got called');
     await analysisStatusCron.checkSingleAnalysis(match);
   }
 

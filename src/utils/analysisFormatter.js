@@ -1,9 +1,15 @@
 import Analysis from '../models/Analysis.js';
 import AppError from './appError.js';
 import { createOne } from '../factory/repo.js';
+import { calculateCaloriesBurned } from './calorieCalculator.js';
 
 // Formatter to convert API response to MongoDB document
 const formatAnalysisResponse = (apiResponse, userId) => {
+  console.log('📦 formatAnalysisResponse - Before cloning:');
+  console.log('  - Has files.highlights:', !!apiResponse.files?.highlights);
+  console.log('  - Highlights type:', Array.isArray(apiResponse.files?.highlights) ? 'Array' : typeof apiResponse.files?.highlights);
+  console.log('  - Highlights count:', apiResponse.files?.highlights?.length || 0);
+
   // Create a copy to avoid mutating the original
   const formatted = JSON.parse(JSON.stringify(apiResponse));
 
@@ -150,14 +156,10 @@ const formatAnalysisResponse = (apiResponse, userId) => {
     }
   }
 
-  // 4. Convert highlights object to Map format
-  if (formatted.files?.highlights) {
-    // Convert plain object to Map
-    const highlightsMap = new Map();
-    for (const [key, value] of Object.entries(formatted.files.highlights)) {
-      highlightsMap.set(key, value);
-    }
-    formatted.files.highlights = highlightsMap;
+  // 4. Ensure highlights is an array
+  if (formatted.files?.highlights && !Array.isArray(formatted.files.highlights)) {
+    // If it's not an array, convert to empty array
+    formatted.files.highlights = [];
   }
 
   // 5. Validate and clean up any null/undefined values
@@ -255,11 +257,11 @@ const validateApiResponse = (response) => {
 
 // Complete workflow function
 const processAnalysisResponse = async (apiResponse, userId) => {
-  console.log(
-    'Processing analysis response...',
-    apiResponse,
-    apiResponse.player_analytics
-  );
+  // console.log(
+  //   'Processing analysis response...',
+  //   apiResponse,
+  //   apiResponse.player_analytics
+  // );
   try {
     // Step 1: Validate the API response
     const validationErrors = validateApiResponse(apiResponse);
@@ -287,13 +289,20 @@ const processAnalysisResponse = async (apiResponse, userId) => {
 
 // Transform new analysis results format to expected format
 const transformNewAnalysisResults = (newFormatResponse) => {
-  const { status, job_id, analysis_status, results, all_clips } =
-    newFormatResponse;
+  const { status, job_id, analysis_status, results } = newFormatResponse;
 
   // If it's not the new format, return as is
   if (!results || typeof results !== 'object' || !job_id) {
     return newFormatResponse;
   }
+
+  // Extract all_clips from results object (it's inside results, not at top level)
+  const all_clips = results.all_clips;
+
+  console.log('🔍 transformNewAnalysisResults - Checking for all_clips:');
+  console.log('  - results keys:', Object.keys(results));
+  console.log('  - has all_clips:', 'all_clips' in results);
+  console.log('  - all_clips value:', all_clips);
 
   // Helper function to safely parse numeric values with units
   const parseValueWithUnit = (value, unit) => {
@@ -312,51 +321,74 @@ const transformNewAnalysisResults = (newFormatResponse) => {
   ];
 
   Object.keys(results).forEach((playerKey, index) => {
+    // Skip non-player keys (like 'all_clips')
+    if (playerKey === 'all_clips') {
+      return;
+    }
+
     const playerData = results[playerKey];
 
     // Convert the new format metrics to the expected format
     // Note: Units changed from Miles/Hour to Kilometers/Hour in the new API
+    const total_distance_km =
+      parseValueWithUnit(playerData['Distance Covered'], 'Meters') / 1000;
+    const average_speed_kmh = parseValueWithUnit(
+      playerData['Average Speed'],
+      'Kilometers per Hour'
+    );
+    const peak_speed_kmh = parseValueWithUnit(
+      playerData['Peak Speed'],
+      'Kilometers per Hour'
+    );
+    const net_dominance_percentage = parseValueWithUnit(
+      playerData['Net Dominance'],
+      '%'
+    );
+    const dead_zone_presence_percentage = parseValueWithUnit(
+      playerData['Dead Zone Presence'],
+      '%'
+    );
+    const baseline_play_percentage = parseValueWithUnit(
+      playerData['Baseline Play'],
+      '%'
+    );
+    const total_sprint_bursts =
+      parseInt(playerData['Total Sprint Bursts']) || 0;
+
+    // Calculate calories burned using distance-based formula
+    // No duration needed - uses distance and speed intensity
+    const calories_burned = calculateCaloriesBurned({
+      distance_km: total_distance_km,
+      avg_speed_kmh: average_speed_kmh,
+      total_sprints: total_sprint_bursts,
+      weight_kg: 80, // Default weight
+    });
+
     const player = {
       player_id: playerKey, // Store the AI server key (a, b, c, d, etc.)
       color: playerColors[index] || [128, 128, 128], // Use default colors or gray
 
       // Distance is now in Meters (was Miles before)
-      total_distance_km:
-        parseValueWithUnit(playerData['Distance Covered'], 'Meters') / 1000,
+      total_distance_km,
 
       // Speed is now in Kilometers per Hour (was Miles per Hour before)
-      average_speed_kmh: parseValueWithUnit(
-        playerData['Average Speed'],
-        'Kilometers per Hour'
-      ),
-      peak_speed_kmh: parseValueWithUnit(
-        playerData['Peak Speed'],
-        'Kilometers per Hour'
-      ),
+      average_speed_kmh,
+      peak_speed_kmh,
 
       // Percentages remain the same
-      net_dominance_percentage: parseValueWithUnit(
-        playerData['Net Dominance'],
-        '%'
-      ),
-      dead_zone_presence_percentage: parseValueWithUnit(
-        playerData['Dead Zone Presence'],
-        '%'
-      ),
-      baseline_play_percentage: parseValueWithUnit(
-        playerData['Baseline Play'],
-        '%'
-      ),
+      net_dominance_percentage,
+      dead_zone_presence_percentage,
+      baseline_play_percentage,
 
       // New field: Total Sprint Bursts
-      total_sprint_bursts: parseInt(playerData['Total Sprint Bursts']) || 0,
+      total_sprint_bursts,
 
       // Player heatmap URL
       player_heatmap: playerData['Player Heatmap'] || null,
 
       // Fields not provided by new API - set defaults
       average_distance_from_center_km: 0,
-      calories_burned: 0,
+      calories_burned,
 
       // Shots data - not provided in new format yet
       shots: {
@@ -372,19 +404,22 @@ const transformNewAnalysisResults = (newFormatResponse) => {
       highlight_urls: [],
     };
 
-    console.log(`Transformed player ${playerKey}:`, player);
+    // console.log(`Transformed player ${playerKey}:`, player);
 
     players.push(player);
   });
 
-  // Transform all_clips into highlights format
+  // Transform all_clips into highlights array
   // all_clips is an array of highlight URLs from AI server
-  // Convert to Map format expected by highlights field
-  const highlightsMap = new Map();
-  if (all_clips && Array.isArray(all_clips) && all_clips.length > 0) {
-    // Store all clips under 'all' key for now
-    // Can be categorized later if AI provides clip types
-    highlightsMap.set('all', all_clips);
+  const highlights = all_clips && Array.isArray(all_clips) ? all_clips : [];
+  
+  if (highlights.length > 0) {
+    console.log('🎬 transformNewAnalysisResults - Created highlights array:');
+    console.log('  - Clips count:', highlights.length);
+    console.log('  - Clips:', highlights);
+  } else {
+    console.log('⚠️  transformNewAnalysisResults - No all_clips found');
+    console.log('  - all_clips value:', all_clips);
   }
 
   // Return in expected format
@@ -394,7 +429,7 @@ const transformNewAnalysisResults = (newFormatResponse) => {
     job_id: job_id,
     player_analytics: {
       metadata: {
-        duration_minutes: 0, // Not provided in new format
+        duration_minutes: 0, // Not provided by AI server yet
         date_analysed: new Date(),
         frame_shape: [1080, 1920], // Default values
         fps: 30,
@@ -413,7 +448,7 @@ const transformNewAnalysisResults = (newFormatResponse) => {
       },
     },
     files: {
-      highlights: highlightsMap,
+      highlights: highlights,
     },
     metadata: {
       created_at: new Date(),
