@@ -287,7 +287,8 @@ const processAnalysisResponse = async (apiResponse, userId) => {
 
 // Transform new analysis results format to expected format
 const transformNewAnalysisResults = (newFormatResponse) => {
-  const { status, job_id, analysis_status, results } = newFormatResponse;
+  const { status, job_id, analysis_status, results, all_clips } =
+    newFormatResponse;
 
   // If it's not the new format, return as is
   if (!results || typeof results !== 'object' || !job_id) {
@@ -376,6 +377,16 @@ const transformNewAnalysisResults = (newFormatResponse) => {
     players.push(player);
   });
 
+  // Transform all_clips into highlights format
+  // all_clips is an array of highlight URLs from AI server
+  // Convert to Map format expected by highlights field
+  const highlightsMap = new Map();
+  if (all_clips && Array.isArray(all_clips) && all_clips.length > 0) {
+    // Store all clips under 'all' key for now
+    // Can be categorized later if AI provides clip types
+    highlightsMap.set('all', all_clips);
+  }
+
   // Return in expected format
   return {
     status: analysis_status || status,
@@ -402,7 +413,7 @@ const transformNewAnalysisResults = (newFormatResponse) => {
       },
     },
     files: {
-      highlights: new Map(),
+      highlights: highlightsMap,
     },
     metadata: {
       created_at: new Date(),
