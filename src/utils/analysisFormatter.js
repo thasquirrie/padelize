@@ -99,6 +99,27 @@ const formatAnalysisResponse = (apiResponse, userId) => {
         player.player_heatmap = null;
       }
 
+      // Recalculate calories if missing or zero but we have valid distance/speed
+      // This handles older data that was saved without calorie calculation
+      if (
+        (!player.calories_burned || player.calories_burned === 0) &&
+        player.total_distance_km > 0 &&
+        player.average_speed_kmh > 0
+      ) {
+        player.calories_burned = calculateCaloriesBurned({
+          distance_km: player.total_distance_km,
+          avg_speed_kmh: player.average_speed_kmh,
+          total_sprints: player.total_sprint_bursts || 0,
+          weight_kg: 80,
+        });
+        console.log(`📊 Recalculated calories for player:`, {
+          distance_km: player.total_distance_km,
+          avg_speed_kmh: player.average_speed_kmh,
+          total_sprints: player.total_sprint_bursts || 0,
+          calories_burned: player.calories_burned,
+        });
+      }
+
       // Handle shot_events - ensure they are properly formatted arrays
       if (player.shot_events) {
         if (Array.isArray(player.shot_events)) {
@@ -124,7 +145,7 @@ const formatAnalysisResponse = (apiResponse, userId) => {
         }
       } else {
         // Ensure shot_events exists as empty array
-        player.shot_events = player;
+        player.shot_events = [];
       }
     });
   }
@@ -352,8 +373,32 @@ const transformNewAnalysisResults = (newFormatResponse) => {
       playerData['Baseline Play'],
       '%'
     );
-    const total_sprint_bursts =
-      parseInt(playerData['Total Sprint Bursts']) || 0;
+    // Robustly extract sprint burst count from AI response.
+    // AI responses have used different keys/casing historically, so try several.
+    const sprintKeys = [
+      'Total Sprint Bursts',
+      'total_sprint_bursts',
+      'Total Sprint Burst',
+      'total_sprint_burst',
+      'Total Sprints',
+      'total_sprints',
+    ];
+
+    let total_sprint_bursts = 0;
+    for (const k of sprintKeys) {
+      if (playerData[k] !== undefined && playerData[k] !== null) {
+        const raw = playerData[k];
+        if (typeof raw === 'number') {
+          total_sprint_bursts = Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : 0;
+        } else if (typeof raw === 'string') {
+          // Clean numeric strings like "12", "12.0", "12 bursts", "12,000"
+          const cleaned = raw.replace(/[^0-9.-]+/g, '');
+          const parsed = parseFloat(cleaned);
+          total_sprint_bursts = Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
+        }
+        break;
+      }
+    }
 
     // Calculate calories burned using distance-based formula
     // No duration needed - uses distance and speed intensity
@@ -362,6 +407,14 @@ const transformNewAnalysisResults = (newFormatResponse) => {
       avg_speed_kmh: average_speed_kmh,
       total_sprints: total_sprint_bursts,
       weight_kg: 80, // Default weight
+    });
+
+    // Debug: Log calorie calculation inputs for troubleshooting
+    console.log(`🔢 Player ${playerKey} calorie calculation:`, {
+      distance_km: total_distance_km,
+      avg_speed_kmh: average_speed_kmh,
+      total_sprints: total_sprint_bursts,
+      calories_burned,
     });
 
     const player = {

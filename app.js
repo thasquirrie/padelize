@@ -51,6 +51,7 @@ import notificationRouter from './src/routes/notificationRoutes.js';
 import leaderboardRouter from './src/routes/leaderboardRoutes.js';
 import webhookLogRouter from './src/routes/webhookLogRoutes.js';
 import coachingAnalysisRouter from './src/routes/coachingAnalysisRoutes.js';
+import multipartUploadRouter from './src/routes/multipartUploadRoutes.js';
 
 app.use(
   session({
@@ -82,6 +83,7 @@ app.use('/api/v1/notifications', notificationRouter);
 app.use('/api/v1/leaderboard', leaderboardRouter);
 app.use('/api/v1/webhook-logs', webhookLogRouter);
 app.use('/api/v1/coaching-analysis', coachingAnalysisRouter);
+app.use('/api/v1/multipart-upload', multipartUploadRouter);
 
 app.get('/', (req, res, next) => {
   res.status(200).json({

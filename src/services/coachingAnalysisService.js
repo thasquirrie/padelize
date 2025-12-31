@@ -4,10 +4,16 @@ import AppError from '../utils/appError.js';
 import Analysis from '../models/Analysis.js';
 import CoachingInsight from '../models/CoachingInsight.js';
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy-initialize OpenAI client to avoid errors during imports
+let openai = null;
+const getOpenAIClient = () => {
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openai;
+};
 
 /**
  * Generate coaching insights from player metrics
@@ -28,6 +34,8 @@ export const generateCoachingInsights = async (playerMetrics) => {
 
   const prompt = `You are an expert PADEL coach analyzing a player's match performance data. Based on the metrics below, provide exactly 3-4 specific, actionable coaching tips focused on improving their padel game.
 
+⚠️ CRITICAL INSTRUCTION: You MUST use ONLY the exact metric values provided below. DO NOT invent, estimate, or fabricate ANY numbers. If you reference a metric in your analysis, use the EXACT value shown below.
+
 PLAYER METRICS:
 - Distance Covered: ${distance_km} km
 - Average Speed: ${avg_speed_kmh} km/h
@@ -37,6 +45,14 @@ PLAYER METRICS:
 - Dead Zone Presence: ${deadzone_percentage}%
 - Total Sprint Bursts: ${total_sprints}
 ${duration ? `- Match Duration: ${duration} minutes` : ''}
+
+⚠️ VERIFICATION CHECKPOINT: Before generating your response, verify that:
+1. If you mention Net Dominance %, you use: ${net_percentage}%
+2. If you mention Baseline Play %, you use: ${baseline_percentage}%
+3. If you mention Dead Zone %, you use: ${deadzone_percentage}%
+4. If you mention Peak Speed, you use: ${peak_speed_kmh} km/h
+5. If you mention Sprint Bursts, you use: ${total_sprints}
+6. DO NOT calculate or derive any percentages - use only what is provided above
 
 PADEL-SPECIFIC CONTEXT:
 - Court positioning matters: Net (aggressive), Baseline (defensive), Dead Zone (poor positioning)
@@ -87,25 +103,38 @@ Peak Speed:
 
 OUTPUT FORMAT (JSON):
 {
-  "player_profile": "One sentence summarizing playstyle based on metrics (e.g., 'Defensive baseline player with limited court coverage')",
+  "player_profile": {
+    "playing_style": "One word: Aggressive/Defensive/Balanced",
+    "intensity_level": "One word: High/Moderate/Low",
+    "court_coverage": "One word: Excellent/Good/Limited"
+  },
 
   "strengths": [
-    "Strength 1: [Best metric/pattern] - {specific metric value with context}",
-    "Strength 2: [Second best aspect] - {specific metric value with context}",
-    "Strength 3: [Third positive if exists] - {specific metric value with context}"
+    {
+      "title": "Best Metric Name",
+      "description": "Specific observation with exact metric value (e.g., 'Your 42% net dominance shows strong attacking play')"
+    },
+    {
+      "title": "Second Best Metric",
+      "description": "Specific observation with exact metric value"
+    }
   ],
 
   "weaknesses": [
-    "Weakness 1 (PRIMARY): [Biggest issue] - {specific metric value with context}",
-    "Weakness 2: [Second issue] - {specific metric value with context}",
-    "Weakness 3: [Third issue if exists] - {specific metric value with context}"
+    {
+      "title": "Primary Issue",
+      "description": "Specific problem with exact metric value (e.g., 'Your 35% dead zone indicates poor positioning')"
+    },
+    {
+      "title": "Secondary Issue",
+      "description": "Specific problem with exact metric value"
+    }
   ],
 
   "actionable_tips": [
-    "TIP 1 (PRIMARY): [Address main weakness] - With your {metric}%, you should {specific action}. {Why it matters for padel.}",
-    "TIP 2: [Address secondary weakness] - {Specific metric observation}. {Concrete drill or tactical adjustment.}",
-    "TIP 3: [Improve strength or address tertiary issue] - {Metric context}. {Actionable improvement.}",
-    "TIP 4 (optional): [Additional improvement] - {Context}. {Specific action.}"
+    "TIP 1 (PRIMARY): Address main weakness - With your {exact metric}%, you should {specific action}. {Why it matters for padel.}",
+    "TIP 2: Address secondary weakness - {Specific metric observation}. {Concrete drill or tactical adjustment.}",
+    "TIP 3: Improve strength or address tertiary issue - {Metric context}. {Actionable improvement.}"
   ],
 
   "tactical_summary": "One sentence on overall game improvement direction"
@@ -125,16 +154,22 @@ CRITICAL RULES:
 - Each tip must be padel-specific (not tennis tactics)
 - Maximum 4 tips, minimum 3 tips
 - Be direct and coaching-focused, not motivational fluff
-- Prioritize positioning issues over fitness issues`;
+- Prioritize positioning issues over fitness issues
+- ⚠️ NEVER INVENT NUMBERS - Use ONLY the exact values provided in PLAYER METRICS section above
+- ⚠️ If you reference Net Dominance, it MUST be ${net_percentage}%, not any other number
+- ⚠️ If you reference Baseline Play, it MUST be ${baseline_percentage}%, not any other number
+- ⚠️ If you reference Dead Zone, it MUST be ${deadzone_percentage}%, not any other number
+- ⚠️ Double-check every number in your response matches the input metrics exactly`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const client = getOpenAIClient();
+    const response = await client.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
           content:
-            'You are an expert PADEL coach providing metric-driven performance analysis. Always return valid JSON.',
+            'You are an expert PADEL coach providing metric-driven performance analysis. Always return valid JSON. CRITICAL: You must use ONLY the exact metric values provided in the user prompt - never invent, estimate, or fabricate numbers. Every percentage and statistic in your response must match the input data exactly.',
         },
         {
           role: 'user',
@@ -256,6 +291,17 @@ export const getCoachingInsightsForAnalysis = async (
   console.log(
     `🔄 Generating new coaching insights for analysis ${analysisId}, player ${actualPlayerId}`
   );
+  console.log('📊 RAW PLAYER DATA FROM DATABASE:', {
+    player_id: actualPlayerId,
+    total_distance_km: playerData.total_distance_km,
+    average_speed_kmh: playerData.average_speed_kmh,
+    peak_speed_kmh: playerData.peak_speed_kmh,
+    net_dominance_percentage: playerData.net_dominance_percentage,
+    baseline_play_percentage: playerData.baseline_play_percentage,
+    dead_zone_presence_percentage: playerData.dead_zone_presence_percentage,
+    total_sprint_bursts: playerData.total_sprint_bursts,
+  });
+  console.log('📤 METRICS BEING SENT TO AI:', playerMetrics);
 
   // Generate insights using OpenAI
   const result = await generateCoachingInsights(playerMetrics);

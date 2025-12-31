@@ -1,6 +1,7 @@
 import { getUserPlanFeatures } from '../middleware/subscriptionMiddleware.js';
 import Analysis from '../models/Analysis.js';
 import AppError from '../utils/appError.js';
+import { calculateCaloriesBurned } from './calorieCalculator.js';
 
 /**
  * Check if user can perform a new match analysis based on their subscription
@@ -98,6 +99,21 @@ export const filterAnalysisResultsBySubscription = (analysis, creator) => {
     if (analysis.player_analytics.players) {
       result.player_analytics.players = analysis.player_analytics.players.map(
         (player) => {
+          // Recalculate calories on-the-fly if missing/zero but we have valid data
+          let calories_burned = player.calories_burned;
+          if (
+            (!calories_burned || calories_burned === 0) &&
+            player.total_distance_km > 0 &&
+            player.average_speed_kmh > 0
+          ) {
+            calories_burned = calculateCaloriesBurned({
+              distance_km: player.total_distance_km,
+              avg_speed_kmh: player.average_speed_kmh,
+              total_sprints: player.total_sprint_bursts || 0,
+              weight_kg: 80,
+            });
+          }
+
           const filteredPlayer = {
             player_id: player.player_id, // Include player_id for correlation with AI server results
             color: player.color,
@@ -105,7 +121,7 @@ export const filterAnalysisResultsBySubscription = (analysis, creator) => {
             total_distance_km: player.total_distance_km,
             average_distance_from_center_km:
               player.average_distance_from_center_km,
-            calories_burned: player.calories_burned,
+            calories_burned: calories_burned,
           };
 
           // Only include shots if user has shot classification features

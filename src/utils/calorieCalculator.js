@@ -15,8 +15,21 @@ export const calculateCaloriesBurned = ({
   total_sprints = 0,
   weight_kg = 80,
 }) => {
-  // Validate inputs
-  if (!distance_km || !avg_speed_kmh) {
+  // Validate inputs - use explicit checks for undefined/null, not falsy
+  // This allows 0 values to be valid (e.g., very short clips with minimal movement)
+  if (
+    distance_km === undefined ||
+    distance_km === null ||
+    avg_speed_kmh === undefined ||
+    avg_speed_kmh === null ||
+    !Number.isFinite(distance_km) ||
+    !Number.isFinite(avg_speed_kmh)
+  ) {
+    return 0;
+  }
+
+  // If both distance and speed are 0, return 0 (no movement)
+  if (distance_km === 0 && avg_speed_kmh === 0) {
     return 0;
   }
 
