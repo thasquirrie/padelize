@@ -11,6 +11,20 @@ const matchSchema = new Schema(
     video: {
       type: String,
     },
+    // Multipart upload tracking
+    videoUpload: {
+      uploadId: String,
+      key: String,
+      status: {
+        type: String,
+        enum: ['initializing', 'uploading', 'completed', 'failed', 'aborted'],
+      },
+      totalParts: Number,
+      uploadedParts: Number,
+      fileSize: Number,
+      startedAt: Date,
+      completedAt: Date,
+    },
     type: {
       type: String,
       enum: ['friendly', 'ranked', 'tournament'],
@@ -78,6 +92,10 @@ const matchSchema = new Schema(
     players: {
       type: Schema.Types.Mixed, // Array of player details { id, name, position, team }
       default: [],
+    },
+    playerDetectionJobId: {
+      type: String,
+      index: true,
     },
     playerDetectionStatus: {
       type: String,

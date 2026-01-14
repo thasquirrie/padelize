@@ -9,8 +9,11 @@ import {
   uploadVideoService,
   checkAnalysisQuotaService,
   analyzeVideosService,
-} from "../services/matchService.js";
-import catchAsync from "../utils/catchAsync.js";
+  initializeMatchVideoUploadService,
+  completeMatchVideoUploadService,
+  abortMatchVideoUploadService,
+} from '../services/matchService.js';
+import catchAsync from '../utils/catchAsync.js';
 
 export const createMatch = catchAsync(async (req, res, next) => {
   createMatchServiceService(req, res, next);
@@ -46,6 +49,19 @@ export const uploadVideo = catchAsync(async (req, res, next) => {
 
 export const getUserProfile = catchAsync(async (req, res, next) => {
   getUserProfileService(req, res, next);
+});
+
+// Multipart upload for match videos
+export const initializeMatchVideoUpload = catchAsync(async (req, res, next) => {
+  initializeMatchVideoUploadService(req, res, next);
+});
+
+export const completeMatchVideoUpload = catchAsync(async (req, res, next) => {
+  completeMatchVideoUploadService(req, res, next);
+});
+
+export const abortMatchVideoUpload = catchAsync(async (req, res, next) => {
+  abortMatchVideoUploadService(req, res, next);
 });
 
 export const checkAnalysisQuota = catchAsync(async (req, res, next) => {

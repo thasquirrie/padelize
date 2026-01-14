@@ -73,7 +73,7 @@ class VideoAnalysisService {
     };
   }
 
-  static fetchPlayers(body) {
+  static async fetchPlayers(body) {
     console.log('Body:', body);
     try {
       const formData = new URLSearchParams();
@@ -83,15 +83,43 @@ class VideoAnalysisService {
         formData.append('video', body.video);
       }
 
-      return fetch(`${PYTHON_API_BASE_URL}/fetch_players/`, {
+      const response = await fetch(`${PYTHON_API_BASE_URL}/fetch_players/`, {
         method: 'POST',
         body: formData,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Python API error: ${response.status} - ${errorText}`);
+      }
+
+      return await response.json();
     } catch (error) {
       console.error('Error fetching players:', error);
+      throw error;
+    }
+  }
+
+  // Check player detection status
+  static async getPlayerDetectionStatus(jobId) {
+    try {
+      const response = await fetch(
+        `${PYTHON_API_BASE_URL}/fetch_players/status/?job_id=${jobId}`
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Status check error: ${response.status} - ${errorText}`
+        );
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error checking player detection status:', error);
       throw error;
     }
   }

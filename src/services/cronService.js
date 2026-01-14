@@ -138,62 +138,88 @@ class AnalysisStatusCronJob {
         }/${MAX_RETRIES})`
       );
 
-      const fetchPlayerJSON = await VideoAnalysisService.fetchPlayers({
-        video,
-      });
-
-      // Check if response is ok before parsing
-      if (!fetchPlayerJSON.ok) {
-        const errorText = await fetchPlayerJSON.text();
-        throw new Error(`API returned ${fetchPlayerJSON.status}: ${errorText}`);
+      // Check if we have a job ID
+      if (!match.playerDetectionJobId) {
+        console.log(
+          `No player detection job ID found for match ${matchId}, will try to start detection`
+        );
+        
+        // Try to start player detection
+        const fetchPlayerResult = await VideoAnalysisService.fetchPlayers({
+          video,
+        });
+        
+        if (fetchPlayerResult.player_detection_job_id) {
+          match.playerDetectionJobId = fetchPlayerResult.player_detection_job_id;
+          match.playerDetectionRetryCount = retryCount + 1;
+          await match.save();
+          console.log(
+            `Player detection started for ${matchId}, job_id: ${fetchPlayerResult.player_detection_job_id}`
+          );
+          return;
+        }
       }
 
-      const fetchPlayerResult = await fetchPlayerJSON.json();
+      // Poll the status endpoint
+      const statusResult = await VideoAnalysisService.getPlayerDetectionStatus(
+        match.playerDetectionJobId
+      );
 
-      // Check if the result indicates processing is still ongoing
+      console.log(
+        `Player detection status for ${matchId}:`,
+        JSON.stringify(statusResult, null, 2)
+      );
+
+      // Check if still processing
       if (
-        fetchPlayerResult.status === 'processing' ||
-        fetchPlayerResult.message === 'still processing'
+        statusResult.processing_status === 'processing' ||
+        statusResult.processing_status === 'pending' ||
+        statusResult.status === 'processing'
       ) {
         console.log(
-          `Player detection ${matchId} still processing on Python API, will check again later`
+          `Player detection ${matchId} still processing, will check again later`
         );
         match.playerDetectionRetryCount = retryCount + 1;
         await match.save();
         return;
       }
 
-      // Check for error responses from API
-      if (
-        fetchPlayerResult.status === 'error' ||
-        fetchPlayerResult.error ||
-        fetchPlayerResult[0] === 'not found'
-      ) {
+      // Check for errors
+      if (statusResult.status === 'error' || statusResult.error) {
         throw new Error(
-          fetchPlayerResult.error ||
-            fetchPlayerResult.message ||
-            'Player detection failed'
+          statusResult.error || statusResult.message || 'Player detection failed'
         );
       }
 
-      match.players = fetchPlayerResult.players || [];
-      match.fetchedPlayerData =
-        fetchPlayerResult[0] != 'not found' && match.players.length > 0;
-      match.playerDetectionStatus = 'completed';
-      match.playerDetectionCompletedAt = new Date();
-      match.playerDetectionRetryCount = 0; // Reset counter on success
+      // Check if completed
+      if (statusResult.processing_status === 'completed') {
+        match.players = statusResult.players || [];
+        match.fetchedPlayerData = match.players.length > 0;
+        match.playerDetectionStatus = 'completed';
+        match.playerDetectionCompletedAt = new Date();
+        match.playerDetectionRetryCount = 0; // Reset counter on success
 
-      await match.save();
+        await match.save();
 
+        console.log(
+          `Player detection completed for ${matchId}: ${match.players.length} players found`
+        );
+
+        await matchNotificationService.notifyPlayerDetectionComplete(
+          creator._id,
+          match,
+          match.players
+        );
+        return;
+      }
+
+      // Unknown status - increment retry
       console.log(
-        `Player detection completed for ${matchId}: ${match.players.length} players found`
+        `Unknown player detection status for ${matchId}:`,
+        statusResult.processing_status || statusResult.status
       );
-
-      await matchNotificationService.notifyPlayerDetectionComplete(
-        creator._id,
-        match,
-        match.players
-      );
+      match.playerDetectionRetryCount = retryCount + 1;
+      await match.save();
     } catch (error) {
       console.error(`Error checking player detection ${matchId}:`, error);
 

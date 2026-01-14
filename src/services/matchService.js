@@ -18,6 +18,13 @@ import {
   getProcessingMessage,
 } from '../utils/subscriptionUtils.js';
 import analysisStatusCron from './cronService.js';
+import {
+  initializeMultipartUpload,
+  completeMultipartUpload,
+  abortMultipartUpload,
+  getPresignedUrlForPart,
+  getBatchPresignedUrls,
+} from './multipartUploadService.js';
 
 export const createMatchServiceService = catchAsync(async (req, res, next) => {
   const match = await createOne(Match, req.body);
@@ -392,11 +399,9 @@ async function processPlayersAsync(matchId, videoUrl) {
   try {
     console.log(`Starting player detection for match ${matchId}`);
 
-    const fetchPlayerJSON = await VideoAnalysisService.fetchPlayers({
+    const fetchPlayerResult = await VideoAnalysisService.fetchPlayers({
       video: videoUrl,
     });
-
-    const fetchPlayerResult = await fetchPlayerJSON.json();
 
     const match = await Match.findById(matchId);
     if (!match) {
@@ -404,6 +409,30 @@ async function processPlayersAsync(matchId, videoUrl) {
       return;
     }
 
+    // Store the job ID from the async response
+    if (fetchPlayerResult.player_detection_job_id) {
+      match.playerDetectionJobId = fetchPlayerResult.player_detection_job_id;
+      match.playerDetectionStatus = 'processing';
+      match.playerDetectionStartedAt = new Date();
+      await match.save();
+      
+      console.log(`Player detection queued for match ${matchId}, job_id: ${fetchPlayerResult.player_detection_job_id}`);
+      
+      // Notify user that detection has started
+      await matchNotificationService.sendMatchNotification({
+        userId: match.creator,
+        type: 'player_detection_started',
+        title: 'Player Detection Started',
+        message: 'We are detecting players in your video. You will be notified when complete.',
+        priority: 'medium',
+        data: { matchId: match._id },
+        match,
+      });
+      
+      return;
+    }
+
+    // Legacy: Handle immediate results (if AI server returns players directly)
     match.players = fetchPlayerResult.players || [];
     match.fetchedPlayerData =
       fetchPlayerResult[0] != 'not found' && match.players.length > 0;
@@ -2070,3 +2099,248 @@ export const checkAnalysisQuotaService = catchAsync(async (req, res, next) => {
 
 // //   const signedUrl = await getSign;
 // // });
+
+/**
+ * MATCH MULTIPART UPLOAD SERVICES
+ * Integrates multipart uploads with match video workflow
+ */
+
+/**
+ * Initialize multipart upload for a match video
+ */
+export const initializeMatchVideoUploadService = catchAsync(
+  async (req, res, next) => {
+    const { matchId } = req.params;
+    const { fileName, fileType, fileSize } = req.body;
+
+    // Validation
+    if (!fileName || !fileType || !fileSize) {
+      return next(
+        new AppError('fileName, fileType, and fileSize are required', 400)
+      );
+    }
+
+    // Find match
+    const match = await Match.findOne({
+      _id: matchId,
+      creator: req.user._id,
+    });
+
+    if (!match) {
+      return next(
+        new AppError('Match not found or you are not the creator', 404)
+      );
+    }
+
+    // Check if match already has a video
+    if (match.video && match.players.length > 0) {
+      return next(
+        new AppError('Match already has a video attached to it', 400)
+      );
+    }
+
+    // Check if there's an ongoing upload
+    if (match.videoUpload?.status === 'uploading') {
+      return next(
+        new AppError('There is already an ongoing upload for this match', 400)
+      );
+    }
+
+    try {
+      // Initialize multipart upload via the generic service
+      const uploadData = await initializeMultipartUpload(
+        fileName,
+        fileType,
+        fileSize,
+        req.user._id.toString()
+      );
+
+      // Update match with upload metadata
+      match.videoUpload = {
+        uploadId: uploadData.uploadId,
+        key: uploadData.key,
+        status: 'uploading',
+        totalParts: 0,
+        uploadedParts: 0,
+        fileSize: fileSize,
+        startedAt: new Date(),
+      };
+
+      await match.save();
+
+      console.log(`✅ Match video upload initialized for match ${matchId}`);
+
+      res.status(200).json({
+        status: 'success',
+        message: 'Match video upload initialized successfully',
+        data: {
+          matchId: match._id,
+          uploadId: uploadData.uploadId,
+          key: uploadData.key,
+          bucket: uploadData.bucket,
+          chunkSize: uploadData.chunkSize,
+          maxChunkSize: uploadData.maxChunkSize,
+        },
+      });
+    } catch (error) {
+      console.error('Error initializing match video upload:', error);
+      return next(new AppError('Failed to initialize match video upload', 500));
+    }
+  }
+);
+
+/**
+ * Complete multipart upload for a match video
+ * This triggers player detection and analysis workflow
+ */
+export const completeMatchVideoUploadService = catchAsync(
+  async (req, res, next) => {
+    const { matchId } = req.params;
+    const { uploadId, key, parts } = req.body;
+
+    // Validation
+    if (!uploadId || !key || !parts || !Array.isArray(parts)) {
+      return next(
+        new AppError('uploadId, key, and parts array are required', 400)
+      );
+    }
+
+    // Find match
+    const match = await Match.findOne({
+      _id: matchId,
+      creator: req.user._id,
+    });
+
+    if (!match) {
+      return next(
+        new AppError('Match not found or you are not the creator', 404)
+      );
+    }
+
+    // Verify upload belongs to this match
+    if (match.videoUpload?.uploadId !== uploadId) {
+      return next(new AppError('Upload ID does not match this match', 400));
+    }
+
+    try {
+      // Complete the multipart upload in S3
+      const result = await completeMultipartUpload(uploadId, key, parts);
+
+      // Update match with video URL and status
+      match.video = result.location;
+      match.videoUpload.status = 'completed';
+      match.videoUpload.completedAt = new Date();
+      match.videoUpload.totalParts = parts.length;
+      match.videoUpload.uploadedParts = parts.length;
+
+      await match.save();
+
+      // Initiate player detection asynchronously
+      processPlayersAsync(matchId, result.location).catch(error => {
+        console.error(`Failed to start player detection for match ${matchId}:`, error);
+      });
+
+      // Send notification about successful upload
+      await matchNotificationService.notifyVideoUploaded(
+        req.user._id,
+        match,
+        result.location
+      );
+
+      console.log(`✅ Match video upload completed for match ${matchId}`);
+      console.log(`📁 Video location: ${result.location}`);
+      console.log(`🔍 Player detection initiated`);
+
+      res.status(200).json({
+        status: 'success',
+        message: 'Video uploaded successfully. Player detection in progress.',
+        data: {
+          matchId: match._id,
+          location: result.location,
+          etag: result.etag,
+          bucket: result.bucket,
+          key: result.key,
+          totalParts: parts.length,
+          fileSize: match.videoUpload.fileSize,
+          playerDetectionStatus: 'processing',
+          uploadedAt: match.videoUpload.completedAt,
+        },
+      });
+    } catch (error) {
+      // Update match status to failed
+      if (match.videoUpload) {
+        match.videoUpload.status = 'failed';
+        await match.save();
+      }
+
+      console.error('Error completing match video upload:', error);
+
+      // Send error notification
+      await matchNotificationService.notifyUploadError(
+        req.user._id,
+        matchId,
+        'Failed to complete video upload. Please try again.'
+      );
+
+      return next(new AppError('Failed to complete match video upload', 500));
+    }
+  }
+);
+
+/**
+ * Abort multipart upload for a match video
+ */
+export const abortMatchVideoUploadService = catchAsync(
+  async (req, res, next) => {
+    const { matchId } = req.params;
+    const { uploadId, key } = req.body;
+
+    // Validation
+    if (!uploadId || !key) {
+      return next(new AppError('uploadId and key are required', 400));
+    }
+
+    // Find match
+    const match = await Match.findOne({
+      _id: matchId,
+      creator: req.user._id,
+    });
+
+    if (!match) {
+      return next(
+        new AppError('Match not found or you are not the creator', 404)
+      );
+    }
+
+    // Verify upload belongs to this match
+    if (match.videoUpload?.uploadId !== uploadId) {
+      return next(new AppError('Upload ID does not match this match', 400));
+    }
+
+    try {
+      // Abort the multipart upload in S3
+      await abortMultipartUpload(uploadId, key);
+
+      // Update match status
+      match.videoUpload.status = 'aborted';
+      match.videoUpload.completedAt = new Date();
+
+      await match.save();
+
+      console.log(`🛑 Match video upload aborted for match ${matchId}`);
+
+      res.status(200).json({
+        status: 'success',
+        message: 'Upload aborted successfully',
+        data: {
+          matchId: match._id,
+          uploadId: uploadId,
+          key: key,
+        },
+      });
+    } catch (error) {
+      console.error('Error aborting match video upload:', error);
+      return next(new AppError('Failed to abort match video upload', 500));
+    }
+  }
+);

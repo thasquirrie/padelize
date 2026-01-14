@@ -9,14 +9,12 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { fromEnv } from '@aws-sdk/credential-provider-env';
 import AppError from '../utils/appError.js';
+import MultipartUpload from '../models/MultipartUpload.js';
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
   credentials: fromEnv(),
 });
-
-// Store for tracking active uploads (in production, use Redis/Database)
-const activeUploads = new Map();
 
 /**
  * Initialize a multipart upload
@@ -33,10 +31,7 @@ export const initializeMultipartUpload = async (
   userId
 ) => {
   // Validate file type (video or image)
-  if (
-    !fileType.startsWith('video/') &&
-    !fileType.startsWith('image/')
-  ) {
+  if (!fileType.startsWith('video/') && !fileType.startsWith('image/')) {
     throw new AppError(
       'Invalid file type. Only video and image files are allowed.',
       400
@@ -63,20 +58,18 @@ export const initializeMultipartUpload = async (
 
     const response = await s3Client.send(command);
 
-    // Store upload metadata
-    const uploadMetadata = {
+    // Store upload metadata in database
+    const uploadRecord = await MultipartUpload.create({
       uploadId: response.UploadId,
       key: key,
       fileName: fileName,
       fileType: fileType,
       fileSize: fileSize,
       userId: userId,
-      createdAt: new Date().toISOString(),
-      parts: [],
+      bucket: process.env.S3_BUCKET_NAME,
       status: 'in_progress',
-    };
-
-    activeUploads.set(response.UploadId, uploadMetadata);
+      parts: [],
+    });
 
     console.log(`✅ Multipart upload initialized: ${response.UploadId}`);
 
@@ -107,11 +100,14 @@ export const getPresignedUrlForPart = async (uploadId, key, partNumber) => {
     throw new AppError('Part number must be between 1 and 10,000', 400);
   }
 
-  // Verify upload exists
-  const uploadMetadata = activeUploads.get(uploadId);
-  if (!uploadMetadata) {
+  // Verify upload exists in database
+  const uploadRecord = await MultipartUpload.findOne({ uploadId });
+  if (!uploadRecord) {
     throw new AppError('Upload not found or expired', 404);
   }
+
+  // Update last accessed time
+  await uploadRecord.touch();
 
   try {
     const command = new UploadPartCommand({
@@ -171,12 +167,17 @@ export const getBatchPresignedUrls = async (
  * @param {string} uploadId - The multipart upload ID
  * @param {string} key - S3 object key
  * @param {Array} parts - Array of {PartNumber, ETag} objects
+/**
+ * Complete multipart upload after all parts are uploaded
+ * @param {string} uploadId - The multipart upload ID
+ * @param {string} key - S3 object key
+ * @param {Array} parts - Array of {PartNumber, ETag} objects
  * @returns {Promise<object>} - Final S3 object location
  */
 export const completeMultipartUpload = async (uploadId, key, parts) => {
-  // Verify upload exists
-  const uploadMetadata = activeUploads.get(uploadId);
-  if (!uploadMetadata) {
+  // Verify upload exists in database
+  const uploadRecord = await MultipartUpload.findOne({ uploadId });
+  if (!uploadRecord) {
     throw new AppError('Upload not found or expired', 404);
   }
 
@@ -188,10 +189,7 @@ export const completeMultipartUpload = async (uploadId, key, parts) => {
   // Validate each part has required fields
   for (const part of parts) {
     if (!part.PartNumber || !part.ETag) {
-      throw new AppError(
-        'Each part must have PartNumber and ETag',
-        400
-      );
+      throw new AppError('Each part must have PartNumber and ETag', 400);
     }
   }
 
@@ -210,18 +208,18 @@ export const completeMultipartUpload = async (uploadId, key, parts) => {
 
     const response = await s3Client.send(command);
 
-    // Update metadata
-    uploadMetadata.status = 'completed';
-    uploadMetadata.completedAt = new Date().toISOString();
-    uploadMetadata.parts = sortedParts;
+    // Update database record
+    uploadRecord.status = 'completed';
+    uploadRecord.completedAt = new Date();
+    uploadRecord.parts = sortedParts.map((part) => ({
+      partNumber: part.PartNumber,
+      etag: part.ETag,
+      uploadedAt: new Date(),
+    }));
+    await uploadRecord.save();
 
     console.log(`✅ Multipart upload completed: ${uploadId}`);
     console.log(`📍 S3 Location: ${response.Location}`);
-
-    // Clean up from active uploads after some time
-    setTimeout(() => {
-      activeUploads.delete(uploadId);
-    }, 60000); // Keep for 1 minute for potential retries
 
     return {
       uploadId,
@@ -229,11 +227,15 @@ export const completeMultipartUpload = async (uploadId, key, parts) => {
       location: response.Location,
       bucket: response.Bucket,
       etag: response.ETag,
-      fileName: uploadMetadata.fileName,
-      fileSize: uploadMetadata.fileSize,
+      fileName: uploadRecord.fileName,
+      fileSize: uploadRecord.fileSize,
       totalParts: sortedParts.length,
     };
   } catch (error) {
+    // Mark as failed in database
+    uploadRecord.status = 'failed';
+    await uploadRecord.save();
+
     console.error('Error completing multipart upload:', error);
     throw new AppError('Failed to complete upload', 500);
   }
@@ -246,8 +248,8 @@ export const completeMultipartUpload = async (uploadId, key, parts) => {
  * @returns {Promise<object>} - Confirmation
  */
 export const abortMultipartUpload = async (uploadId, key) => {
-  const uploadMetadata = activeUploads.get(uploadId);
-  if (!uploadMetadata) {
+  const uploadRecord = await MultipartUpload.findOne({ uploadId });
+  if (!uploadRecord) {
     throw new AppError('Upload not found', 404);
   }
 
@@ -260,12 +262,10 @@ export const abortMultipartUpload = async (uploadId, key) => {
 
     await s3Client.send(command);
 
-    // Update metadata
-    uploadMetadata.status = 'aborted';
-    uploadMetadata.abortedAt = new Date().toISOString();
-
-    // Clean up
-    activeUploads.delete(uploadId);
+    // Update database record
+    uploadRecord.status = 'aborted';
+    uploadRecord.abortedAt = new Date();
+    await uploadRecord.save();
 
     console.log(`🗑️ Multipart upload aborted: ${uploadId}`);
 
@@ -322,27 +322,67 @@ export const listUploadedParts = async (uploadId, key) => {
  * @param {string} uploadId - The multipart upload ID
  * @returns {object} - Upload metadata
  */
-export const getUploadStatus = (uploadId) => {
-  const metadata = activeUploads.get(uploadId);
-  if (!metadata) {
+export const getUploadStatus = async (uploadId) => {
+  const uploadRecord = await MultipartUpload.findOne({ uploadId });
+  if (!uploadRecord) {
     throw new AppError('Upload not found', 404);
   }
-  return metadata;
+
+  // Update last accessed time
+  await uploadRecord.touch();
+
+  return {
+    uploadId: uploadRecord.uploadId,
+    key: uploadRecord.key,
+    fileName: uploadRecord.fileName,
+    fileType: uploadRecord.fileType,
+    fileSize: uploadRecord.fileSize,
+    userId: uploadRecord.userId,
+    status: uploadRecord.status,
+    parts: uploadRecord.parts,
+    createdAt: uploadRecord.createdAt,
+    completedAt: uploadRecord.completedAt,
+    lastAccessedAt: uploadRecord.lastAccessedAt,
+  };
 };
 
-// Cleanup function to remove stale uploads (run periodically)
-export const cleanupStaleUploads = () => {
-  const now = Date.now();
-  const staleThreshold = 24 * 60 * 60 * 1000; // 24 hours
+/**
+ * Cleanup function to remove stale uploads (run periodically)
+ * Aborts uploads that have expired or been inactive for too long
+ */
+export const cleanupStaleUploads = async () => {
+  try {
+    const now = new Date();
 
-  for (const [uploadId, metadata] of activeUploads.entries()) {
-    const age = now - new Date(metadata.createdAt).getTime();
-    if (age > staleThreshold && metadata.status === 'in_progress') {
-      console.log(`🧹 Cleaning up stale upload: ${uploadId}`);
-      abortMultipartUpload(uploadId, metadata.key).catch((err) =>
-        console.error('Error aborting stale upload:', err)
-      );
+    // Find stale in-progress uploads
+    const staleUploads = await MultipartUpload.find({
+      status: 'in_progress',
+      expiresAt: { $lt: now },
+    });
+
+    console.log(`🧹 Found ${staleUploads.length} stale uploads to clean up`);
+
+    for (const upload of staleUploads) {
+      try {
+        console.log(`🗑️ Cleaning up stale upload: ${upload.uploadId}`);
+        await abortMultipartUpload(upload.uploadId, upload.key);
+      } catch (err) {
+        console.error(`Error aborting stale upload ${upload.uploadId}:`, err);
+      }
     }
+
+    // Optionally: Delete old completed/aborted records (older than 7 days)
+    const oldRecordDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const deletedCount = await MultipartUpload.deleteMany({
+      status: { $in: ['completed', 'aborted', 'failed'] },
+      updatedAt: { $lt: oldRecordDate },
+    });
+
+    if (deletedCount.deletedCount > 0) {
+      console.log(`🗑️ Deleted ${deletedCount.deletedCount} old upload records`);
+    }
+  } catch (error) {
+    console.error('Error during cleanup:', error);
   }
 };
 

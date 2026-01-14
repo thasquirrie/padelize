@@ -34,7 +34,9 @@ export const initializeUpload = catchAsync(async (req, res, next) => {
   if (fileSize > maxFileSize) {
     return next(
       new AppError(
-        `File size exceeds maximum allowed size of ${maxFileSize / (1024 * 1024 * 1024)}GB`,
+        `File size exceeds maximum allowed size of ${
+          maxFileSize / (1024 * 1024 * 1024)
+        }GB`,
         400
       )
     );
@@ -89,10 +91,7 @@ export const getBatchPresignedUrlsController = catchAsync(
 
     if (!uploadId || !key || !startPart || !endPart) {
       return next(
-        new AppError(
-          'uploadId, key, startPart, and endPart are required',
-          400
-        )
+        new AppError('uploadId, key, startPart, and endPart are required', 400)
       );
     }
 
@@ -192,7 +191,7 @@ export const getStatus = catchAsync(async (req, res, next) => {
     return next(new AppError('uploadId is required', 400));
   }
 
-  const result = getUploadStatus(uploadId);
+  const result = await getUploadStatus(uploadId);
 
   res.status(200).json({
     status: 'success',

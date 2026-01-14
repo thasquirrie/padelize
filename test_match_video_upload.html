@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Match Video Upload Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .container {
+            border: 2px solid #4CAF50;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        h1 {
+            color: #4CAF50;
+        }
+        .input-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, button {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 30px;
+            background-color: #4CAF50;
+            border-radius: 4px;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .log {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        .log div {
+            margin: 5px 0;
+            padding: 5px;
+        }
+        .log .success {
+            color: #4CAF50;
+        }
+        .log .error {
+            color: #f44336;
+        }
+        .log .info {
+            color: #2196F3;
+        }
+        .file-info {
+            background-color: #e3f2fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .alert {
+            background-color: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎾 Padelize Match Video Upload Tester</h1>
+        
+        <div class="alert">
+            <strong>⚠️ Note:</strong> This uploads directly to a match and triggers player detection automatically upon completion.
+        </div>
+
+        <div class="input-group">
+            <label>API Base URL:</label>
+            <input type="text" id="apiUrl" value="http://localhost:3000/api/v1" placeholder="http://localhost:3000/api/v1">
+        </div>
+
+        <div class="input-group">
+            <label>JWT Token:</label>
+            <input type="text" id="jwtToken" placeholder="Paste your JWT token here">
+        </div>
+
+        <div class="input-group">
+            <label>Match ID:</label>
+            <input type="text" id="matchId" placeholder="Enter the match ID">
+        </div>
+
+        <div class="input-group">
+            <label>Select Video File:</label>
+            <input type="file" id="fileInput" accept="video/*">
+        </div>
+
+        <div class="file-info" id="fileInfo" style="display: none;">
+            <strong>File Details:</strong>
+            <div id="fileDetails"></div>
+        </div>
+
+        <div class="input-group">
+            <label>Chunk Size (MB):</label>
+            <input type="number" id="chunkSize" value="10" min="5" max="100" placeholder="5-100 MB">
+        </div>
+
+        <button onclick="startMatchUpload()" id="uploadBtn">Start Match Video Upload</button>
+        <button onclick="abortUpload()" id="abortBtn" disabled style="background-color: #f44336;">Abort Upload</button>
+
+        <div class="progress-container" id="progressContainer" style="display: none;">
+            <div class="progress-bar" id="progressBar">0%</div>
+        </div>
+
+        <div class="log" id="log">
+            <div class="info">📋 Logs will appear here...</div>
+        </div>
+    </div>
+
+    <script>
+        let currentUploadId = null;
+        let currentKey = null;
+        let abortController = null;
+
+        // File selection handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const fileInfo = document.getElementById('fileInfo');
+                const fileDetails = document.getElementById('fileDetails');
+                fileInfo.style.display = 'block';
+                fileDetails.innerHTML = `
+                    <div>Name: ${file.name}</div>
+                    <div>Size: ${(file.size / (1024 * 1024)).toFixed(2)} MB</div>
+                    <div>Type: ${file.type}</div>
+                `;
+                log(`File selected: ${file.name}`, 'info');
+            }
+        });
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(div);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function updateProgress(percent) {
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = Math.round(percent) + '%';
+        }
+
+        async function startMatchUpload() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const token = document.getElementById('jwtToken').value;
+            const matchId = document.getElementById('matchId').value;
+            const fileInput = document.getElementById('fileInput');
+            const chunkSizeMB = parseInt(document.getElementById('chunkSize').value);
+
+            // Validation
+            if (!token) {
+                alert('Please enter your JWT token');
+                return;
+            }
+            if (!matchId) {
+                alert('Please enter the match ID');
+                return;
+            }
+            if (!fileInput.files[0]) {
+                alert('Please select a video file');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const chunkSize = chunkSizeMB * 1024 * 1024; // Convert to bytes
+
+            // UI updates
+            document.getElementById('uploadBtn').disabled = true;
+            document.getElementById('abortBtn').disabled = false;
+            document.getElementById('progressContainer').style.display = 'block';
+            updateProgress(0);
+
+            abortController = new AbortController();
+
+            try {
+                log(`🚀 Starting match video upload for match: ${matchId}`, 'info');
+
+                // Step 1: Initialize match video upload
+                log('Step 1: Initializing match video upload...', 'info');
+                const initResponse = await fetch(`${apiUrl}/matches/${matchId}/video/multipart/initialize`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        fileName: file.name,
+                        fileType: file.type,
+                        fileSize: file.size
+                    }),
+                    signal: abortController.signal
+                });
+
+                if (!initResponse.ok) {
+                    throw new Error(`Initialize failed: ${await initResponse.text()}`);
+                }
+
+                const initData = await initResponse.json();
+                currentUploadId = initData.data.uploadId;
+                currentKey = initData.data.key;
+
+                log(`✅ Match video upload initialized: ${currentUploadId}`, 'success');
+                log(`📁 S3 Key: ${currentKey}`, 'info');
+                log(`🏓 Match ID: ${matchId}`, 'info');
+
+                // Step 2: Split file into chunks
+                const totalChunks = Math.ceil(file.size / chunkSize);
+                log(`📦 Splitting file into ${totalChunks} chunks...`, 'info');
+
+                const chunks = [];
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    chunks.push(file.slice(start, end));
+                }
+
+                // Step 3: Get presigned URLs (use generic multipart endpoint)
+                log(`Step 2: Getting presigned URLs for ${totalChunks} parts...`, 'info');
+                const urlsResponse = await fetch(`${apiUrl}/multipart-upload/batch-presigned-urls`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        uploadId: currentUploadId,
+                        key: currentKey,
+                        startPart: 1,
+                        endPart: totalChunks
+                    }),
+                    signal: abortController.signal
+                });
+
+                if (!urlsResponse.ok) {
+                    throw new Error(`Get URLs failed: ${await urlsResponse.text()}`);
+                }
+
+                const urlsData = await urlsResponse.json();
+                log(`✅ Received ${urlsData.data.count} presigned URLs`, 'success');
+
+                // Step 4: Upload chunks
+                log(`Step 3: Uploading ${totalChunks} chunks...`, 'info');
+                const uploadedParts = [];
+                
+                for (let i = 0; i < chunks.length; i++) {
+                    const chunk = chunks[i];
+                    const urlInfo = urlsData.data.urls[i];
+                    
+                    log(`Uploading part ${i + 1}/${totalChunks}...`, 'info');
+                    
+                    const uploadResponse = await fetch(urlInfo.presignedUrl, {
+                        method: 'PUT',
+                        body: chunk,
+                        signal: abortController.signal
+                    });
+
+                    if (!uploadResponse.ok) {
+                        throw new Error(`Upload part ${i + 1} failed`);
+                    }
+
+                    const etag = uploadResponse.headers.get('ETag');
+                    uploadedParts.push({
+                        PartNumber: urlInfo.partNumber,
+                        ETag: etag
+                    });
+
+                    const progress = ((i + 1) / totalChunks) * 90; // Reserve 10% for completion
+                    updateProgress(progress);
+                    log(`✅ Part ${i + 1}/${totalChunks} uploaded (${(chunk.size / (1024 * 1024)).toFixed(2)} MB)`, 'success');
+                }
+
+                // Step 5: Complete match video upload
+                log(`Step 4: Completing match video upload...`, 'info');
+                const completeResponse = await fetch(`${apiUrl}/matches/${matchId}/video/multipart/complete`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        uploadId: currentUploadId,
+                        key: currentKey,
+                        parts: uploadedParts
+                    }),
+                    signal: abortController.signal
+                });
+
+                if (!completeResponse.ok) {
+                    throw new Error(`Complete failed: ${await completeResponse.text()}`);
+                }
+
+                const completeData = await completeResponse.json();
+                updateProgress(100);
+
+                log('🎉 Match video upload completed successfully!', 'success');
+                log(`📍 File location: ${completeData.data.location}`, 'success');
+                log(`📊 Total parts: ${completeData.data.totalParts}`, 'info');
+                log(`📏 File size: ${(completeData.data.fileSize / (1024 * 1024)).toFixed(2)} MB`, 'info');
+                log(`🔍 Player detection status: ${completeData.data.playerDetectionStatus}`, 'info');
+                log('✨ Player detection is now running in the background!', 'success');
+
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    log('⚠️ Upload aborted by user', 'error');
+                } else {
+                    log(`❌ Error: ${error.message}`, 'error');
+                    console.error(error);
+                }
+            } finally {
+                document.getElementById('uploadBtn').disabled = false;
+                document.getElementById('abortBtn').disabled = true;
+                currentUploadId = null;
+                currentKey = null;
+                abortController = null;
+            }
+        }
+
+        async function abortUpload() {
+            if (!currentUploadId || !currentKey) {
+                return;
+            }
+
+            const apiUrl = document.getElementById('apiUrl').value;
+            const token = document.getElementById('jwtToken').value;
+            const matchId = document.getElementById('matchId').value;
+
+            try {
+                log('🛑 Aborting match video upload...', 'info');
+                
+                // Cancel ongoing requests
+                if (abortController) {
+                    abortController.abort();
+                }
+
+                // Call abort API
+                const response = await fetch(`${apiUrl}/matches/${matchId}/video/multipart/abort`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        uploadId: currentUploadId,
+                        key: currentKey
+                    })
+                });
+
+                if (response.ok) {
+                    log('✅ Match video upload aborted successfully', 'success');
+                } else {
+                    log('⚠️ Abort request failed, but upload was cancelled', 'error');
+                }
+            } catch (error) {
+                log(`❌ Abort error: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
