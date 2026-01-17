@@ -4701,6 +4701,216 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Submit Video Link (Google Drive, Photos, Dropbox)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"videoLink\": \"https://drive.google.com/file/d/1abc123/view\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/matches/:matchId/video-link",
+              "host": ["{{URL}}"],
+              "path": ["matches", ":matchId", "video-link"],
+              "variable": [
+                {
+                  "key": "matchId",
+                  "value": "your-match-id",
+                  "description": "The ID of the match"
+                }
+              ]
+            },
+            "description": "Submit a video link from Google Drive, Google Photos, or Dropbox for download. The streaming service will download the video and upload it to S3, then send a webhook when complete."
+          },
+          "response": [
+            {
+              "name": "Success - Download Initiated",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"videoLink\": \"https://drive.google.com/file/d/1abc123/view\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{URL}}/matches/:matchId/video-link",
+                  "host": ["{{URL}}"],
+                  "path": ["matches", ":matchId", "video-link"],
+                  "variable": [
+                    {
+                      "key": "matchId",
+                      "value": "your-match-id"
+                    }
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Video download initiated. You will be notified when it completes.\",\n  \"data\": {\n    \"matchId\": \"65abc123def456\",\n    \"jobId\": \"job_xyz789abc\",\n    \"jobStatus\": \"pending\",\n    \"streamingStatus\": \"pending\",\n    \"startedAt\": \"2026-01-15T10:30:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "Error - Invalid Platform",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"videoLink\": \"https://www.icloud.com/photos/123\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{URL}}/matches/:matchId/video-link",
+                  "host": ["{{URL}}"],
+                  "path": ["matches", ":matchId", "video-link"],
+                  "variable": [
+                    {
+                      "key": "matchId",
+                      "value": "your-match-id"
+                    }
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"fail\",\n  \"message\": \"Invalid video link. Only links from Google Drive, Google Photos, Dropbox are supported.\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Streaming Webhook (Called by streaming.padelize.ai)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jobId\": \"job_xyz789abc\",\n  \"status\": \"completed\",\n  \"s3Url\": \"https://s3.amazonaws.com/padelize-videos/matches/video.mp4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/webhooks/streaming",
+              "host": ["{{URL}}"],
+              "path": ["webhooks", "streaming"]
+            },
+            "description": "This endpoint is called by streaming.padelize.ai when video download completes. Backend finds the match using the jobId from the request body."
+          },
+          "response": [
+            {
+              "name": "Success - Completed",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"jobId\": \"job_xyz789abc\",\n  \"status\": \"completed\",\n  \"s3Url\": \"https://s3.amazonaws.com/padelize-videos/matches/video.mp4\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{URL}}/webhooks/streaming",
+                  "host": ["{{URL}}"],
+                  "path": ["webhooks", "streaming"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Video download completed and processed\",\n  \"data\": {\n    \"matchId\": \"65abc123def456\",\n    \"videoUrl\": \"https://s3.amazonaws.com/padelize-videos/matches/video.mp4\"\n  }\n}"
+            },
+            {
+              "name": "Failed Download",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"jobId\": \"job_xyz789abc\",\n  \"status\": \"failed\",\n  \"error\": \"Download timeout\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{URL}}/webhooks/streaming",
+                  "host": ["{{URL}}"],
+                  "path": ["webhooks", "streaming"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Video download failure recorded\",\n  \"data\": {\n    \"matchId\": \"65abc123def456\",\n    \"error\": \"Download timeout\"\n  }\n}"
+            }
+          ]
         }
       ]
     },

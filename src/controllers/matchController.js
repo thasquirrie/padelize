@@ -12,6 +12,7 @@ import {
   initializeMatchVideoUploadService,
   completeMatchVideoUploadService,
   abortMatchVideoUploadService,
+  submitVideoLinkService,
 } from '../services/matchService.js';
 import catchAsync from '../utils/catchAsync.js';
 
@@ -66,4 +67,8 @@ export const abortMatchVideoUpload = catchAsync(async (req, res, next) => {
 
 export const checkAnalysisQuota = catchAsync(async (req, res, next) => {
   checkAnalysisQuotaService(req, res, next);
+});
+
+export const submitVideoLink = catchAsync(async (req, res, next) => {
+  submitVideoLinkService(req, res, next);
 });

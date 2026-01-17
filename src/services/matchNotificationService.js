@@ -39,6 +39,78 @@ class MatchNotificationService {
       match,
     });
   }
+
+  /**
+   * Notify user when player detection has started
+   * @param {string} userId - User ID to notify
+   * @param {Object} match - Match object
+   */
+  async notifyPlayerDetectionStarted(userId, match) {
+    return this.sendMatchNotification({
+      userId,
+      type: 'player_detection_started',
+      title: 'Player Detection Started',
+      message: 'Player detection has started for your match video',
+      priority: 'medium',
+      data: { matchId: match._id },
+      match,
+    });
+  }
+
+  /**
+   * Notify user when video download starts
+   * @param {string} userId - User ID to notify
+   * @param {Object} match - Match object
+   */
+  async notifyVideoDownloadStarted(userId, match) {
+    return this.sendMatchNotification({
+      userId,
+      type: 'video_download_started',
+      title: 'Video Download Started',
+      message: 'Your video is being downloaded from the shared link',
+      priority: 'medium',
+      data: { matchId: match._id },
+      match,
+    });
+  }
+
+  /**
+   * Notify user when video is ready after download
+   * @param {string} userId - User ID to notify
+   * @param {Object} match - Match object
+   */
+  async notifyMatchVideoReady(userId, match) {
+    return this.sendMatchNotification({
+      userId,
+      type: 'video_download_complete',
+      title: 'Video Download Complete',
+      message:
+        'Your video has been downloaded successfully! Player detection is now starting.',
+      priority: 'high',
+      data: { matchId: match._id, videoUrl: match.video },
+      match,
+    });
+  }
+
+  /**
+   * Notify user when video download fails
+   * @param {string} userId - User ID to notify
+   * @param {Object} match - Match object
+   * @param {string} error - Error message
+   */
+  async notifyMatchVideoFailed(userId, match, error) {
+    return this.sendMatchNotification({
+      userId,
+      type: 'video_download_failed',
+      title: 'Video Download Failed',
+      message:
+        error || 'There was an error downloading your video. Please try again.',
+      priority: 'high',
+      data: { matchId: match._id, error },
+      match,
+    });
+  }
+
   /**
    * Send comprehensive notification for match events
    * @param {Object} options - Notification options

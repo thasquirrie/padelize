@@ -143,14 +143,15 @@ class AnalysisStatusCronJob {
         console.log(
           `No player detection job ID found for match ${matchId}, will try to start detection`
         );
-        
+
         // Try to start player detection
         const fetchPlayerResult = await VideoAnalysisService.fetchPlayers({
           video,
         });
-        
+
         if (fetchPlayerResult.player_detection_job_id) {
-          match.playerDetectionJobId = fetchPlayerResult.player_detection_job_id;
+          match.playerDetectionJobId =
+            fetchPlayerResult.player_detection_job_id;
           match.playerDetectionRetryCount = retryCount + 1;
           await match.save();
           console.log(
@@ -187,7 +188,9 @@ class AnalysisStatusCronJob {
       // Check for errors
       if (statusResult.status === 'error' || statusResult.error) {
         throw new Error(
-          statusResult.error || statusResult.message || 'Player detection failed'
+          statusResult.error ||
+            statusResult.message ||
+            'Player detection failed'
         );
       }
 
@@ -452,7 +455,7 @@ class AnalysisStatusCronJob {
       );
 
       let results = transformNewAnalysisResults(status);
-      
+
       // Don't use spread operator - it destroys the Map in files.highlights
       // Instead, directly add the match_id property
       results.match_id = matchId;

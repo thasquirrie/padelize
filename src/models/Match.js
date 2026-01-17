@@ -109,6 +109,19 @@ const matchSchema = new Schema(
       type: Number,
       default: 0,
     },
+    // Streaming service job tracking for video downloads from external links
+    streamingJobId: {
+      type: String,
+      index: true,
+    },
+    streamingStatus: {
+      type: String,
+      enum: ['not_started', 'pending', 'completed', 'failed'],
+      default: 'not_started',
+    },
+    streamingStartedAt: Date,
+    streamingCompletedAt: Date,
+    streamingError: String,
     // startTime: {
     //   type: Date,
     //   required: true,

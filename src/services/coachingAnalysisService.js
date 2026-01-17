@@ -177,11 +177,23 @@ CRITICAL RULES:
         },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.7,
+      temperature: 0.3, // Lower temperature for more consistent, factual responses
       max_tokens: 800,
     });
 
     const insights = JSON.parse(response.choices[0].message.content);
+
+    // Validate that AI used correct numbers (basic sanity check)
+    const insightsStr = JSON.stringify(insights);
+    const containsMetrics = 
+      insightsStr.includes(net_percentage.toString()) ||
+      insightsStr.includes(baseline_percentage.toString()) ||
+      insightsStr.includes(deadzone_percentage.toString());
+    
+    if (!containsMetrics) {
+      console.warn('⚠️  WARNING: AI response may not contain expected metric values');
+      console.warn('Expected metrics:', { net_percentage, baseline_percentage, deadzone_percentage });
+    }
 
     // Calculate cost (gpt-4o-mini pricing as of 2024)
     // Input: $0.150 per 1M tokens, Output: $0.600 per 1M tokens
@@ -261,7 +273,7 @@ export const getCoachingInsightsForAnalysis = async (
 
     if (existingInsight) {
       console.log(
-        `✅ Using cached coaching insights for analysis ${analysisId}, player ${actualPlayerId}`
+        `✅ Using cached coaching insights for analysis ${analysisId}, player ${actualPlayerId} (cached at: ${existingInsight.createdAt})`
       );
       return {
         analysis_id: analysisId,
@@ -273,7 +285,15 @@ export const getCoachingInsightsForAnalysis = async (
         tokens_used: existingInsight.tokens_used,
         cost_usd: existingInsight.cost_usd,
       };
+    } else {
+      console.log(
+        `🔍 No cached insights found for analysis ${analysisId}, player ${actualPlayerId} - will generate new`
+      );
     }
+  } else {
+    console.log(
+      `🔄 Force regenerate requested for analysis ${analysisId}, player ${actualPlayerId} - will overwrite cache`
+    );
   }
 
   // Extract metrics
@@ -306,24 +326,44 @@ export const getCoachingInsightsForAnalysis = async (
   // Generate insights using OpenAI
   const result = await generateCoachingInsights(playerMetrics);
 
-  // Save insights to database for future use
+  // Save or update insights to database for future use
   try {
-    const coachingInsight = await CoachingInsight.create({
-      analysis: analysisId,
-      player_id: actualPlayerId,
-      metrics: playerMetrics,
-      insights: result.insights,
-      model_used: 'gpt-4o-mini',
-      tokens_used: result.usage || {},
-      cost_usd: result.cost_usd || 0,
-    });
+    // Use findOneAndUpdate with upsert to handle race conditions and force regenerate
+    const coachingInsight = await CoachingInsight.findOneAndUpdate(
+      {
+        analysis: analysisId,
+        player_id: actualPlayerId,
+      },
+      {
+        $set: {
+          metrics: playerMetrics,
+          insights: result.insights,
+          model_used: 'gpt-4o-mini',
+          tokens_used: result.usage || {},
+          cost_usd: result.cost_usd || 0,
+        },
+      },
+      {
+        upsert: true, // Create if doesn't exist
+        new: true, // Return updated document
+        setDefaultsOnInsert: true,
+      }
+    );
 
     console.log(
       `💾 Saved coaching insights to database (ID: ${coachingInsight._id})`
     );
   } catch (saveError) {
-    console.error('Failed to save coaching insights:', saveError);
-    // Don't throw - return the generated insights even if save fails
+    console.error('❌ Failed to save coaching insights:', saveError);
+    console.error('Save error details:', {
+      message: saveError.message,
+      code: saveError.code,
+      name: saveError.name,
+    });
+    // Still return the generated insights even if save fails
+    console.warn(
+      '⚠️  Returning generated insights without caching due to save error'
+    );
   }
 
   return {

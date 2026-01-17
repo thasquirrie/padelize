@@ -14,6 +14,7 @@ import {
   initializeMatchVideoUpload,
   completeMatchVideoUpload,
   abortMatchVideoUpload,
+  submitVideoLink,
 } from '../controllers/matchController.js';
 import { videoUpload } from '../services/s3UploadService.js';
 import {
@@ -44,6 +45,9 @@ router.post(
 );
 router.post('/:matchId/video/multipart/complete', completeMatchVideoUpload);
 router.post('/:matchId/video/multipart/abort', abortMatchVideoUpload);
+
+// Submit video link (Dropbox, Google Photos, etc.) for download
+router.post('/:matchId/video-link', submitVideoLink);
 
 router.post('/analyze/:matchId', analyzeMatch);
 

@@ -25,6 +25,7 @@ import {
   getPresignedUrlForPart,
   getBatchPresignedUrls,
 } from './multipartUploadService.js';
+import StreamingService from './streamingService.js';
 
 export const createMatchServiceService = catchAsync(async (req, res, next) => {
   const match = await createOne(Match, req.body);
@@ -415,20 +416,23 @@ async function processPlayersAsync(matchId, videoUrl) {
       match.playerDetectionStatus = 'processing';
       match.playerDetectionStartedAt = new Date();
       await match.save();
-      
-      console.log(`Player detection queued for match ${matchId}, job_id: ${fetchPlayerResult.player_detection_job_id}`);
-      
+
+      console.log(
+        `Player detection queued for match ${matchId}, job_id: ${fetchPlayerResult.player_detection_job_id}`
+      );
+
       // Notify user that detection has started
       await matchNotificationService.sendMatchNotification({
         userId: match.creator,
         type: 'player_detection_started',
         title: 'Player Detection Started',
-        message: 'We are detecting players in your video. You will be notified when complete.',
+        message:
+          'We are detecting players in your video. You will be notified when complete.',
         priority: 'medium',
         data: { matchId: match._id },
         match,
       });
-      
+
       return;
     }
 
@@ -2236,8 +2240,11 @@ export const completeMatchVideoUploadService = catchAsync(
       await match.save();
 
       // Initiate player detection asynchronously
-      processPlayersAsync(matchId, result.location).catch(error => {
-        console.error(`Failed to start player detection for match ${matchId}:`, error);
+      processPlayersAsync(matchId, result.location).catch((error) => {
+        console.error(
+          `Failed to start player detection for match ${matchId}:`,
+          error
+        );
       });
 
       // Send notification about successful upload
@@ -2344,3 +2351,107 @@ export const abortMatchVideoUploadService = catchAsync(
     }
   }
 );
+
+/**
+ * Submit video link (from iCloud, Google Photos, etc.) for download
+ * POST /api/v1/matches/:matchId/video-link
+ */
+export const submitVideoLinkService = catchAsync(async (req, res, next) => {
+  const { matchId } = req.params;
+  const { videoLink } = req.body;
+
+  // Validation
+  if (!videoLink) {
+    return next(new AppError('videoLink is required', 400));
+  }
+
+  // Validate that link is from supported platforms
+  const supportedPlatforms = [
+    { name: 'Google Drive', patterns: ['drive.google.com', 'docs.google.com'] },
+    { name: 'Google Photos', patterns: ['photos.google.com', 'photos.app.goo.gl'] },
+    { name: 'Dropbox', patterns: ['dropbox.com', 'dl.dropboxusercontent.com'] }
+  ];
+
+  const isSupported = supportedPlatforms.some(platform =>
+    platform.patterns.some(pattern => videoLink.toLowerCase().includes(pattern))
+  );
+
+  if (!isSupported) {
+    const supportedNames = supportedPlatforms.map(p => p.name).join(', ');
+    return next(
+      new AppError(
+        `Invalid video link. Only links from ${supportedNames} are supported.`,
+        400
+      )
+    );
+  }
+
+  // Find match
+  const match = await Match.findOne({
+    _id: matchId,
+    creator: req.user._id,
+  });
+
+  if (!match) {
+    return next(
+      new AppError('Match not found or you are not the creator', 404)
+    );
+  }
+
+  // Check if match already has a video or streaming job in progress
+  if (match.video) {
+    return next(new AppError('Match already has a video', 400));
+  }
+
+  if (match.streamingJobId && match.streamingStatus === 'pending') {
+    return next(new AppError('Video download already in progress', 400));
+  }
+
+  try {
+    // Create download job with streaming.padelize.ai
+    const result = await StreamingService.createDownloadJob(videoLink, matchId);
+
+    // Update match with job ID and status
+    match.streamingJobId = result.jobId;
+    match.streamingStatus = 'pending';
+    match.streamingStartedAt = new Date();
+
+    await match.save();
+
+    // Send notification about download initiated
+    await matchNotificationService.notifyVideoDownloadStarted(
+      req.user._id,
+      match
+    );
+
+    console.log(`✅ Video download initiated for match ${matchId}`);
+    console.log(`📥 Job ID: ${result.jobId}`);
+    console.log(`🔗 Video link: ${videoLink.substring(0, 50)}...`);
+
+    res.status(202).json({
+      status: 'success',
+      message:
+        'Video download initiated. You will be notified when it completes.',
+      data: {
+        matchId: match._id,
+        jobId: result.jobId,
+        jobStatus: result.status,
+        streamingStatus: match.streamingStatus,
+        startedAt: match.streamingStartedAt,
+      },
+    });
+  } catch (error) {
+    console.error('Error submitting video link:', error);
+
+    // Send error notification
+    await matchNotificationService.notifyUploadError(
+      req.user._id,
+      matchId,
+      'Failed to initiate video download. Please try again.'
+    );
+
+    return next(
+      new AppError(`Failed to initiate video download: ${error.message}`, 500)
+    );
+  }
+});

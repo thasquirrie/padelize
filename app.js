@@ -52,6 +52,8 @@ import leaderboardRouter from './src/routes/leaderboardRoutes.js';
 import webhookLogRouter from './src/routes/webhookLogRoutes.js';
 import coachingAnalysisRouter from './src/routes/coachingAnalysisRoutes.js';
 import multipartUploadRouter from './src/routes/multipartUploadRoutes.js';
+import streamingWebhookRouter from './src/routes/streamingWebhookRoutes.js';
+import jobRouter from './src/routes/jobRoutes.js';
 
 app.use(
   session({
@@ -84,6 +86,8 @@ app.use('/api/v1/leaderboard', leaderboardRouter);
 app.use('/api/v1/webhook-logs', webhookLogRouter);
 app.use('/api/v1/coaching-analysis', coachingAnalysisRouter);
 app.use('/api/v1/multipart-upload', multipartUploadRouter);
+app.use('/api/v1/webhooks', streamingWebhookRouter);
+app.use('/api/v1/jobs', jobRouter);
 
 app.get('/', (req, res, next) => {
   res.status(200).json({
