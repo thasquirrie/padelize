@@ -94,4 +94,12 @@ const createLogger = (options) => {
   return init();
 };
 
-export default createLogger;
+// Create and export a default logger instance for app-wide use
+const logger = createLogger({
+  label: 'padelize-api',
+  debugMode: keys.NODE_ENV !== 'production',
+});
+
+// Also export the createLogger function for custom logger instances
+export { createLogger };
+export default logger;

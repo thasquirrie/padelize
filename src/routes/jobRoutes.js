@@ -1,16 +1,16 @@
 import express from 'express';
 import { getJobStatus } from '../controllers/jobController.js';
-import { authenticateApiKey } from '../middleware/apiKeyAuth.js';
+import { protect } from '../controllers/authController.js';
 
 const router = express.Router();
 
 /**
  * @route   GET /api/v1/jobs/:jobId
  * @desc    Get job status for streaming video download
- * @access  Public with API key authentication
+ * @access  Protected (JWT required)
  *
  * Headers:
- *   X-API-Key: <api-key>
+ *   Authorization: Bearer <jwt-token>
  *
  * Response:
  * {
@@ -25,6 +25,6 @@ const router = express.Router();
  *   completedAt: Date
  * }
  */
-router.get('/:jobId', authenticateApiKey, getJobStatus);
+router.get('/:jobId', protect, getJobStatus);
 
 export default router;

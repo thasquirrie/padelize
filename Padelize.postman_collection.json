@@ -4818,6 +4818,238 @@
               "body": "{\n  \"status\": \"fail\",\n  \"message\": \"Invalid video link. Only links from Google Drive, Google Photos, Dropbox are supported.\"\n}"
             }
           ]
+        },
+        {
+          "name": "Get Job Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/jobs/:jobId",
+              "host": ["{{URL}}"],
+              "path": ["jobs", ":jobId"],
+              "variable": [
+                {
+                  "key": "jobId",
+                  "value": "job_xyz789abc",
+                  "description": "Job identifier returned from video-link submission"
+                }
+              ]
+            },
+            "description": "Poll the status of a video download job. Use this endpoint to check if the video has been downloaded and processed.\n\n**Authentication**: Requires JWT token in `Authorization` header.\n\n**Response Status Values**:\n- `pending` - Job is queued or in progress\n- `completed` - Video downloaded successfully, s3Url is available\n- `failed` - Job failed, error contains details"
+          },
+          "response": [
+            {
+              "name": "Success - Pending",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{URL}}/jobs/:jobId",
+                  "host": ["{{URL}}"],
+                  "path": ["jobs", ":jobId"],
+                  "variable": [
+                    {
+                      "key": "jobId",
+                      "value": "job_xyz789abc"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"jobId\": \"job_xyz789abc\",\n  \"status\": \"pending\",\n  \"link\": \"https://www.icloud.com/iclouddrive/abc123/video.mov\",\n  \"linkType\": \"iCloud\",\n  \"s3Url\": null,\n  \"error\": null,\n  \"createdAt\": \"2026-01-17T10:00:00.000Z\",\n  \"updatedAt\": \"2026-01-17T10:01:30.000Z\",\n  \"completedAt\": null\n}"
+            },
+            {
+              "name": "Success - Completed",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{URL}}/jobs/:jobId",
+                  "host": ["{{URL}}"],
+                  "path": ["jobs", ":jobId"],
+                  "variable": [
+                    {
+                      "key": "jobId",
+                      "value": "job_xyz789abc"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"jobId\": \"job_xyz789abc\",\n  \"status\": \"completed\",\n  \"link\": \"https://www.icloud.com/iclouddrive/abc123/video.mov\",\n  \"linkType\": \"iCloud\",\n  \"s3Url\": \"https://s3.amazonaws.com/padelize-videos/matches/video.mp4\",\n  \"error\": null,\n  \"createdAt\": \"2026-01-17T10:00:00.000Z\",\n  \"updatedAt\": \"2026-01-17T10:05:30.000Z\",\n  \"completedAt\": \"2026-01-17T10:05:30.000Z\"\n}"
+            },
+            {
+              "name": "Success - Failed",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{URL}}/jobs/:jobId",
+                  "host": ["{{URL}}"],
+                  "path": ["jobs", ":jobId"],
+                  "variable": [
+                    {
+                      "key": "jobId",
+                      "value": "job_xyz789abc"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"jobId\": \"job_xyz789abc\",\n  \"status\": \"failed\",\n  \"link\": \"https://www.icloud.com/iclouddrive/abc123/video.mov\",\n  \"linkType\": \"iCloud\",\n  \"s3Url\": null,\n  \"error\": \"Download timeout - file not accessible\",\n  \"createdAt\": \"2026-01-17T10:00:00.000Z\",\n  \"updatedAt\": \"2026-01-17T10:02:45.000Z\",\n  \"completedAt\": \"2026-01-17T10:02:45.000Z\"\n}"
+            },
+            {
+              "name": "Error - Unauthorized (Missing API Key)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{URL}}/jobs/:jobId",
+                  "host": ["{{URL}}"],
+                  "path": ["jobs", ":jobId"],
+                  "variable": [
+                    {
+                      "key": "jobId",
+                      "value": "job_xyz789abc"
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"error\",\n  \"message\": \"You are not logged in! Please log in to get access.\"\n}"
+            },
+            {
+              "name": "Error - Forbidden (Invalid JWT)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer invalid-token-123",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{URL}}/jobs/:jobId",
+                  "host": ["{{URL}}"],
+                  "path": ["jobs", ":jobId"],
+                  "variable": [
+                    {
+                      "key": "jobId",
+                      "value": "job_xyz789abc"
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"error\",\n  \"message\": \"jwt malformed\"\n}"
+            },
+            {
+              "name": "Error - Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-API-Key",
+                    "value": "{{API_KEY}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{URL}}/jobs/:jobId",
+                  "host": ["{{URL}}"],
+                  "path": ["jobs", ":jobId"],
+                  "variable": [
+                    {
+                      "key": "jobId",
+                      "value": "non-existent-job-id"
+                    }
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"error\",\n  \"message\": \"Job not found\"\n}"
+            }
+          ]
         }
       ]
     },
