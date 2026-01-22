@@ -139,27 +139,48 @@ class NotificationService {
         type,
         relatedPost = null,
         relatedReply = null,
+        relatedMatch = null,
         customTitle = null,
         customMessage = null,
         priority = 'medium',
       } = data;
 
-      // Don't send notification to self
+      // Don't send notification to self (except for match-related and post-related system notifications)
+      // Match-related notifications include: matchCreated, analysisStarted, player_detection_complete, etc.
+      const isMatchRelatedNotification = 
+        type.includes('match') || 
+        type.includes('analysis') || 
+        type.includes('player_detection') ||
+        type.includes('video') ||
+        type.includes('upload');
+      
       if (
         recipient.toString() === sender.toString() &&
-        !type.includes('match') &&
+        !isMatchRelatedNotification &&
         !type.includes('post')
       ) {
         return null;
       }
 
       // Generate title and message based on type
-      const senderUser = await findOne(User, { _id: sender });
-      const { title, message } = await this.generateNotificationContent(
-        type,
-        senderUser,
-        { relatedPost, relatedReply, customTitle, customMessage }
-      );
+      // For custom notifications (match notifications), we don't need to fetch sender
+      let title, message;
+      if (customTitle && customMessage) {
+        title = customTitle;
+        message = customMessage;
+      } else {
+        const senderUser = await findOne(User, { _id: sender });
+        if (!senderUser) {
+          throw new AppError('Sender user not found', 404);
+        }
+        const content = await this.generateNotificationContent(
+          type,
+          senderUser,
+          { relatedPost, relatedReply, relatedMatch, customTitle, customMessage }
+        );
+        title = content.title;
+        message = content.message;
+      }
 
       // Create or update grouped notification
       const notification = await Notification.createOrUpdateGrouped({
@@ -170,6 +191,7 @@ class NotificationService {
         message,
         relatedPost,
         relatedReply,
+        relatedMatch,
         priority,
       });
 

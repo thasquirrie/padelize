@@ -139,6 +139,7 @@ class MatchNotificationService {
         recipient: userId,
         sender: userId, // System notifications from self
         type: type,
+        relatedMatch: match?._id || data?.matchId, // Link to match
         customTitle: title,
         customMessage: message,
         priority: priority,

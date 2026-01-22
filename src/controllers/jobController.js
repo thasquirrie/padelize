@@ -1,7 +1,6 @@
 import Match from '../models/Match.js';
 import catchAsync from '../utils/catchAsync.js';
 import AppError from '../utils/appError.js';
-import logger from '../config/logger.js';
 
 /**
  * Get job status by jobId
@@ -12,7 +11,7 @@ import logger from '../config/logger.js';
 export const getJobStatus = catchAsync(async (req, res, next) => {
   const { jobId } = req.params;
 
-  logger.info('Job status requested', { jobId });
+  global.createLogger.info('Job status requested', { jobId });
 
   // Find match by streamingJobId
   const match = await Match.findOne({ streamingJobId: jobId }).select(
@@ -20,7 +19,7 @@ export const getJobStatus = catchAsync(async (req, res, next) => {
   );
 
   if (!match) {
-    logger.warn('Job not found', { jobId });
+    global.createLogger.warn('Job not found', { jobId });
     return next(new AppError('Job not found', 404));
   }
 
@@ -47,7 +46,7 @@ export const getJobStatus = catchAsync(async (req, res, next) => {
     completedAt: match.streamingCompletedAt || null,
   };
 
-  logger.info('Job status retrieved', { jobId, status: jobStatus });
+  global.createLogger.info('Job status retrieved', { jobId, status: jobStatus });
 
   res.status(200).json(response);
 });

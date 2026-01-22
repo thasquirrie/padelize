@@ -373,25 +373,19 @@ export const getMatchService = catchAsync(async (req, res, next) => {
     message = 'Match analysis completed successfully.';
   }
 
+  // Import at the top of file if not already imported
+  const { computeMatchProcessingStatus } = await import('../utils/matchStatusHelper.js');
+  
+  // Compute unified processing status
+  const processingStatus = computeMatchProcessingStatus(match.toObject ? match.toObject() : match);
+
   res.status(200).json({
     status: 'success',
     message,
     data: {
       match,
       analysis,
-      processingStatus: {
-        playerDetection: {
-          status: match.playerDetectionStatus || 'not_started',
-          playersFound: match.players?.length || 0,
-          startedAt: match.playerDetectionStartedAt,
-          completedAt: match.playerDetectionCompletedAt,
-          error: match.playerDetectionError,
-        },
-        analysis: {
-          status: match.analysisStatus || 'not_started',
-          analysisId: match.analysisId,
-        },
-      },
+      processingStatus,
     },
   });
 });
@@ -535,11 +529,18 @@ export const getAllMatchesService = catchAsync(async (req, res, next) => {
     { $unset: 'analysis' },
   ]);
 
+  // Compute processing status for all matches
+  const { computeMatchProcessingStatus } = await import('../utils/matchStatusHelper.js');
+  const matchesWithStatus = matches.map(match => ({
+    ...match,
+    processingStatus: computeMatchProcessingStatus(match),
+  }));
+
   res.status(200).json({
     status: 'success',
-    length: matches.length,
+    length: matchesWithStatus.length,
     data: {
-      matches,
+      matches: matchesWithStatus,
     },
   });
 });
@@ -610,10 +611,17 @@ export const getUserMatchesService = catchAsync(async (req, res, next) => {
     // },
   ]);
 
+  // Compute processing status for all matches
+  const { computeMatchProcessingStatus } = await import('../utils/matchStatusHelper.js');
+  const matchesWithStatus = matches.map(match => ({
+    ...match,
+    processingStatus: computeMatchProcessingStatus(match),
+  }));
+
   res.status(200).json({
     status: 'success',
-    length: matches.length,
-    data: { matches },
+    length: matchesWithStatus.length,
+    data: { matches: matchesWithStatus },
   });
 });
 

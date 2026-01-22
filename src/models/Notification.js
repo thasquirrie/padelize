@@ -22,16 +22,51 @@ const notificationSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
+        // Social notifications
         'like', // Someone liked your post
         'reply', // Someone replied to your post
         'replyLike', // Someone liked your reply
         'follow', // Someone followed you
         'mention', // Someone mentioned you (future feature)
         'comment', // Someone commented on your post (if different from reply)
-        'matchCreated', // Match created notification
-        'matchUpdated', // Match updated notification
+        
+        // Post notifications
         'postCreated', // Post created notification
         'postUpdated', // Post updated notification
+        
+        // Match notifications
+        'matchCreated', // Match created notification
+        'matchUpdated', // Match updated notification
+        'matchDeleted', // Match deleted notification
+        'matchShared', // Match shared with you
+        
+        // Video upload notifications
+        'videoUploaded', // Video uploaded successfully
+        'uploadError', // Video upload failed
+        
+        // Video download notifications (for link uploads)
+        'video_download_started', // Video download from link started
+        'video_download_complete', // Video download completed
+        'video_download_failed', // Video download failed
+        
+        // Player detection notifications
+        'player_detection_started', // Player detection started
+        'player_detection_complete', // Player detection completed
+        'player_detection_failed', // Player detection failed
+        
+        // Analysis notifications
+        'analysisStarting', // Analysis is about to start
+        'analysisStarted', // Analysis started successfully
+        'analysisCompleted', // Analysis completed successfully
+        'analysisError', // Analysis failed
+        'analysisRestart', // Analysis is being restarted
+        'analysisProgress', // Analysis progress update
+        
+        // Bulk and system notifications
+        'bulkAnalysisCompleted', // Multiple analyses completed
+        'systemMaintenance', // System maintenance notification
+        'matchSummary', // Weekly/monthly summary
+        'matchMilestone', // Achievement/milestone reached
       ],
       required: true,
       index: true,
@@ -62,6 +97,13 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Reply',
       default: null,
+    },
+
+    relatedMatch: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Match',
+      default: null,
+      index: true,
     },
 
     // Additional data (stored as JSON for flexibility)
@@ -129,10 +171,10 @@ notificationSchema.methods.markAsRead = function () {
 
 // Static method to create grouped notifications
 notificationSchema.statics.createOrUpdateGrouped = async function (data) {
-  const { recipient, sender, type, relatedPost, relatedReply } = data;
+  const { recipient, sender, type, relatedPost, relatedReply, relatedMatch } = data;
 
   // Create group key for similar notifications
-  const groupKey = `${recipient}_${type}_${relatedPost || relatedReply}`;
+  const groupKey = `${recipient}_${type}_${relatedPost || relatedReply || relatedMatch}`;
 
   // Check if there's an existing unread notification of the same type
   const existingNotification = await this.findOne({
@@ -140,6 +182,7 @@ notificationSchema.statics.createOrUpdateGrouped = async function (data) {
     type,
     relatedPost,
     relatedReply,
+    relatedMatch,
     read: false,
     groupKey,
     createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Within 24 hours

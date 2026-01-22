@@ -1,7 +1,7 @@
-import winston from "winston";
-import fs from "fs";
-import appRoot from "app-root-path";
-import keys from "./key.js";
+import winston from 'winston';
+import fs from 'fs';
+import appRoot from 'app-root-path';
+import keys from './key.js';
 
 const {
   combine,
@@ -15,7 +15,7 @@ const getLogToProcess = (fileOpt, consoleOpt) => {
   const array = [];
   array.push(
     new winston.transports.File(fileOpt),
-    new winston.transports.Console(consoleOpt)
+    new winston.transports.Console(consoleOpt),
   );
   return array;
 };
@@ -32,10 +32,10 @@ const getLogToProcess = (fileOpt, consoleOpt) => {
  */
 const createLogger = (options) => {
   const logDir = options.logDirPath || `${appRoot}/logs`;
-  const label = options.label || "log";
+  const label = options.label || 'log';
   const commonOptions = {
     console: {
-      level: "debug",
+      level: 'debug',
       handleExceptions: true,
       format: combine(
         colorize({ all: true }),
@@ -43,12 +43,12 @@ const createLogger = (options) => {
           (msg) =>
             `[${new Date(msg.timestamp).toUTCString()}]: ${msg.label} : - ${
               msg.level
-            }: ${msg.message}`
-        )
+            }: ${msg.message}`,
+        ),
       ),
     },
     file: {
-      level: "debug",
+      level: 'debug',
       filename: `${logDir}/app.log`,
       handleExceptions: true,
       maxsize: 5242880,
@@ -57,12 +57,12 @@ const createLogger = (options) => {
     },
   };
   const debugMode = !!options.debugMode;
-  const environment = keys.NODE_ENV || "development";
+  const environment = keys.NODE_ENV || 'development';
 
   const getTransports = () => {
     const { console, file } = commonOptions;
-    let level = debugMode ? "debug" : "info";
-    if (environment === "production" && debugMode) level = "error";
+    let level = debugMode ? 'debug' : 'info';
+    if (environment === 'production' && debugMode) level = 'error';
     const consoleOpt = { ...console, level };
     const fileOpt = {
       ...file,
@@ -78,7 +78,7 @@ const createLogger = (options) => {
         timestamp(),
         winstonLabel({
           label: label,
-        })
+        }),
       ),
       transports: getTransports(),
       exitOnError: false,
@@ -101,5 +101,6 @@ const logger = createLogger({
 });
 
 // Also export the createLogger function for custom logger instances
-export { createLogger };
-export default logger;
+// export { createLogger };
+// export default logger;
+export default createLogger;

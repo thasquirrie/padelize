@@ -1,7 +1,6 @@
 import Match from '../models/Match.js';
 import catchAsync from '../utils/catchAsync.js';
 import AppError from '../utils/appError.js';
-import logger from '../config/logger.js';
 import matchNotificationService from '../services/matchNotificationService.js';
 import { VideoAnalysisService } from '../services/analysisService.js';
 
@@ -20,7 +19,7 @@ import { VideoAnalysisService } from '../services/analysisService.js';
 export const handleStreamingWebhook = catchAsync(async (req, res, next) => {
   const { jobId, status, s3Url, error } = req.body;
 
-  logger.info('Streaming webhook received', {
+  global.createLogger.info('Streaming webhook received', {
     jobId,
     status,
     hasS3Url: !!s3Url,
@@ -41,18 +40,18 @@ export const handleStreamingWebhook = catchAsync(async (req, res, next) => {
   // Find the match by streamingJobId
   const match = await Match.findOne({ streamingJobId: jobId });
   if (!match) {
-    logger.error('Match not found for streaming webhook', { jobId });
+    global.createLogger.error('Match not found for streaming webhook', { jobId });
     return next(new AppError('Match not found for this job ID', 404));
   }
 
   // Handle completed download
   if (status === 'completed') {
     if (!s3Url) {
-      logger.error('Completed webhook missing s3Url', { matchId, jobId });
+      global.createLogger.error('Completed webhook missing s3Url', { matchId, jobId });
       return next(new AppError('Missing s3Url in completed webhook', 400));
     }
 
-    logger.info('Video download completed, updating match', {
+    global.createLogger.info('Video download completed, updating match', {
       matchId: match._id,
       jobId,
       s3Url,
@@ -69,7 +68,7 @@ export const handleStreamingWebhook = catchAsync(async (req, res, next) => {
 
     // Optionally, trigger player detection automatically
     try {
-      logger.info('Initiating player detection after video download', {
+      global.createLogger.info('Initiating player detection after video download', {
         matchId: match._id,
         videoUrl: s3Url,
       });
@@ -85,7 +84,7 @@ export const handleStreamingWebhook = catchAsync(async (req, res, next) => {
         match.playerDetectionStartedAt = new Date();
         await match.save();
 
-        logger.info('Player detection initiated', {
+        global.createLogger.info('Player detection initiated', {
           matchId: match._id,
           playerDetectionJobId: playerDetectionResponse.player_detection_job_id,
         });
@@ -97,14 +96,14 @@ export const handleStreamingWebhook = catchAsync(async (req, res, next) => {
         );
       }
     } catch (error) {
-      logger.error('Failed to initiate player detection', {
+      global.createLogger.error('Failed to initiate player detection', {
         matchId: match._id,
         error: error.message,
       });
       // Don't fail the webhook - video is already saved
     }
 
-    logger.info('Streaming webhook processed successfully', {
+    global.createLogger.info('Streaming webhook processed successfully', {
       matchId: match._id,
       jobId,
       status: 'completed',
@@ -122,7 +121,7 @@ export const handleStreamingWebhook = catchAsync(async (req, res, next) => {
 
   // Handle failed download
   if (status === 'failed') {
-    logger.error('Video download failed', {
+    global.createLogger.error('Video download failed', {
       matchId: match._id,
       jobId,
       error,
@@ -140,7 +139,7 @@ export const handleStreamingWebhook = catchAsync(async (req, res, next) => {
       error
     );
 
-    logger.info('Streaming webhook processed (failed status)', {
+    global.createLogger.info('Streaming webhook processed (failed status)', {
       matchId: match._id,
       jobId,
       status: 'failed',

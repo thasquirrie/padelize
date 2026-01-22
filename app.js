@@ -25,7 +25,7 @@ app.use(cors(corsOptions));
 app.post(
   '/api/v1/stripe_webhook',
   express.raw({ type: 'application/json' }),
-  stripeWebhook
+  stripeWebhook,
 );
 app.use(json());
 
@@ -60,7 +60,7 @@ app.use(
     secret: 'secret',
     resave: false,
     saveUninitialized: false,
-  })
+  }),
 );
 
 app.use(passport.initialize());
@@ -100,8 +100,8 @@ app.all('*', (req, res, next) => {
   next(
     new AppError(
       `The requested page: ${req.originalUrl} using the method: ${req.method} not found on this server`,
-      404
-    )
+      404,
+    ),
   );
 });
 

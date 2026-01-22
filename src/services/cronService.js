@@ -13,6 +13,7 @@ import {
 } from '../utils/analysisFormatter.js';
 import ProcessingLock from '../models/ProcessingLock.js';
 import matchNotificationService from './matchNotificationService.js';
+import StreamingService from './streamingService.js';
 
 class AnalysisStatusCronJob {
   constructor() {
@@ -25,7 +26,7 @@ class AnalysisStatusCronJob {
     console.log('Starting analysis status cron job...');
 
     this.cronJob = cron.schedule(
-      '*/3 * * * *',
+      '*/30 * * * * *',
       async () => {
         if (this.isRunning) {
           console.log('Previous cron job still running, skipping...');
@@ -37,6 +38,7 @@ class AnalysisStatusCronJob {
 
         try {
           await Promise.all([
+            this.checkPendingDownloads(),
             this.checkPendingPlayerDetections(),
             this.checkPendingAnalyses(),
           ]);
@@ -49,16 +51,132 @@ class AnalysisStatusCronJob {
       {
         scheduled: true,
         timezone: 'UTC',
-      }
+      },
     );
 
-    console.log('Status cron job started - running every 3 minutes');
+    console.log('Status cron job started - running every 30 seconds');
   }
 
   stop() {
     if (this.cronJob) {
       this.cronJob.stop();
       console.log('Analysis status cron job stopped');
+    }
+  }
+
+  // ==========================================
+  // VIDEO DOWNLOAD METHODS
+  // ==========================================
+
+  async checkPendingDownloads() {
+    try {
+      const pendingMatches = await Match.find({
+        streamingStatus: 'pending',
+        streamingJobId: { $exists: true, $ne: null },
+      }).populate({ path: 'creator', select: 'fullName _id' });
+
+      console.log(
+        `Found ${pendingMatches.length} pending video downloads to check`,
+      );
+
+      const promises = pendingMatches.map((match) =>
+        this.checkSingleDownload(match),
+      );
+
+      await Promise.allSettled(promises);
+    } catch (error) {
+      console.error('Error checking pending downloads:', error);
+    }
+  }
+
+  async checkSingleDownload(match) {
+    const { _id: matchId, streamingJobId, creator } = match;
+
+    try {
+      console.log(`Checking download status for match ${matchId}, job ${streamingJobId}`);
+
+      let jobStatus;
+      try {
+        jobStatus = await StreamingService.getJobStatus(streamingJobId);
+      } catch (error) {
+        // Handle 404 - job not found (expired or deleted)
+        if (error.message.includes('404') || error.message.includes('not found')) {
+          console.log(`⚠️  Job ${streamingJobId} not found (expired), marking as failed`);
+          match.streamingStatus = 'failed';
+          match.streamingCompletedAt = new Date();
+          match.streamingError = 'Job expired or not found in streaming service';
+          await match.save();
+          return;
+        }
+        throw error; // Re-throw other errors
+      }
+
+      console.log(`Download job ${streamingJobId} status:`, jobStatus);
+
+      if (jobStatus.status === 'completed') {
+        if (!jobStatus.s3Url) {
+          console.error(`Download completed but no s3Url for job ${streamingJobId}`);
+          return;
+        }
+
+        console.log(`✅ Download completed for match ${matchId}, updating...`);
+
+        // Update match with video URL
+        match.video = jobStatus.s3Url;
+        match.streamingStatus = 'completed';
+        match.streamingCompletedAt = new Date();
+        await match.save();
+
+        // Send notification
+        await matchNotificationService.notifyMatchVideoReady(creator._id, match);
+
+        // Start player detection automatically
+        try {
+          console.log(`🎯 Initiating player detection for match ${matchId}`);
+
+          const playerDetectionResponse = await VideoAnalysisService.fetchPlayers({
+            video: jobStatus.s3Url,
+          });
+
+          if (playerDetectionResponse.player_detection_job_id) {
+            match.playerDetectionJobId = playerDetectionResponse.player_detection_job_id;
+            match.playerDetectionStatus = 'processing';
+            match.playerDetectionStartedAt = new Date();
+            await match.save();
+
+            console.log(`✅ Player detection started for match ${matchId}`);
+
+            // Notify that player detection has started
+            await matchNotificationService.notifyPlayerDetectionStarted(
+              creator._id,
+              match
+            );
+          }
+        } catch (error) {
+          console.error(`Failed to initiate player detection for match ${matchId}:`, error);
+        }
+
+      } else if (jobStatus.status === 'failed') {
+        console.error(`❌ Download failed for match ${matchId}`);
+
+        match.streamingStatus = 'failed';
+        match.streamingCompletedAt = new Date();
+        match.streamingError = jobStatus.error || 'Download failed';
+        await match.save();
+
+        // Send notification about failure
+        await matchNotificationService.notifyMatchVideoFailed(
+          creator._id,
+          match,
+          jobStatus.error
+        );
+
+      } else if (jobStatus.status === 'processing') {
+        console.log(`⏳ Download still processing for match ${matchId}`);
+      }
+
+    } catch (error) {
+      console.error(`Error checking download for match ${matchId}:`, error.message);
     }
   }
 
@@ -70,17 +188,21 @@ class AnalysisStatusCronJob {
     try {
       await this.cleanupExpiredLocks();
 
+      // Find matches that need player detection started OR are processing
       const pendingMatches = await Match.find({
-        playerDetectionStatus: 'processing',
+        $or: [
+          { playerDetectionStatus: 'processing' }, // Check status
+          { playerDetectionStatus: 'not_started' }, // Start detection
+        ],
         video: { $exists: true, $ne: null },
       }).populate({ path: 'creator', select: 'fullName _id' });
 
       console.log(
-        `Found ${pendingMatches.length} pending player detections to check`
+        `Found ${pendingMatches.length} player detection tasks (processing + not_started)`,
       );
 
       const promises = pendingMatches.map((match) =>
-        this.checkSinglePlayerDetection(match)
+        this.checkSinglePlayerDetection(match),
       );
 
       await Promise.allSettled(promises);
@@ -90,12 +212,42 @@ class AnalysisStatusCronJob {
   }
 
   async checkSinglePlayerDetection(match) {
-    const { _id: matchId, video, creator } = match;
+    const { _id: matchId, video, creator, playerDetectionStatus } = match;
 
+    // If status is not_started, initiate player detection
+    if (playerDetectionStatus === 'not_started') {
+      try {
+        console.log(`🎯 Starting player detection for match ${matchId} (status: not_started)`);
+
+        const playerDetectionResponse = await VideoAnalysisService.fetchPlayers({
+          video: video,
+        });
+
+        if (playerDetectionResponse.player_detection_job_id) {
+          match.playerDetectionJobId = playerDetectionResponse.player_detection_job_id;
+          match.playerDetectionStatus = 'processing';
+          match.playerDetectionStartedAt = new Date();
+          await match.save();
+
+          console.log(`✅ Player detection initiated for match ${matchId}, job: ${playerDetectionResponse.player_detection_job_id}`);
+
+          // Notify that player detection has started
+          await matchNotificationService.notifyPlayerDetectionStarted(
+            creator._id,
+            match
+          );
+        }
+      } catch (error) {
+        console.error(`❌ Failed to start player detection for match ${matchId}:`, error.message);
+      }
+      return;
+    }
+
+    // For processing status, check the status
     const lockKey = `player_${matchId}`;
     if (await this.isProcessing(lockKey)) {
       console.log(
-        `Player detection ${matchId} already being checked, skipping...`
+        `Player detection ${matchId} already being checked, skipping...`,
       );
       return;
     }
@@ -104,7 +256,7 @@ class AnalysisStatusCronJob {
       Date.now() - new Date(match.playerDetectionStartedAt).getTime();
     if (processingDuration > this.PLAYER_DETECTION_TIMEOUT) {
       console.log(
-        `Player detection ${matchId} timed out after ${processingDuration}ms`
+        `Player detection ${matchId} timed out after ${processingDuration}ms`,
       );
       await this.handlePlayerDetectionTimeout(match);
       return;
@@ -112,15 +264,15 @@ class AnalysisStatusCronJob {
 
     // Check retry count and fail if exceeded
     const retryCount = match.playerDetectionRetryCount || 0;
-    const MAX_RETRIES = 10; // 10 retries * 3 minutes = 30 minutes max
+    const MAX_RETRIES = 50; // 10 retries * 3 minutes = 30 minutes max
 
     if (retryCount >= MAX_RETRIES) {
       console.log(
-        `Player detection ${matchId} exceeded max retries (${MAX_RETRIES})`
+        `Player detection ${matchId} exceeded max retries (${MAX_RETRIES})`,
       );
       await this.handlePlayerDetectionFailure(
         match,
-        `Failed after ${MAX_RETRIES} retry attempts`
+        `Failed after ${MAX_RETRIES} retry attempts`,
       );
       return;
     }
@@ -135,13 +287,13 @@ class AnalysisStatusCronJob {
       console.log(
         `Checking player detection for match: ${matchId} (attempt ${
           retryCount + 1
-        }/${MAX_RETRIES})`
+        }/${MAX_RETRIES})`,
       );
 
       // Check if we have a job ID
       if (!match.playerDetectionJobId) {
         console.log(
-          `No player detection job ID found for match ${matchId}, will try to start detection`
+          `No player detection job ID found for match ${matchId}, will try to start detection`,
         );
 
         // Try to start player detection
@@ -155,30 +307,37 @@ class AnalysisStatusCronJob {
           match.playerDetectionRetryCount = retryCount + 1;
           await match.save();
           console.log(
-            `Player detection started for ${matchId}, job_id: ${fetchPlayerResult.player_detection_job_id}`
+            `Player detection started for ${matchId}, job_id: ${fetchPlayerResult.player_detection_job_id}`,
           );
           return;
         }
+
+        console.log('Fetch Player result:', fetchPlayerResult);
       }
 
       // Poll the status endpoint
       const statusResult = await VideoAnalysisService.getPlayerDetectionStatus(
-        match.playerDetectionJobId
+        match.playerDetectionJobId,
       );
 
       console.log(
         `Player detection status for ${matchId}:`,
-        JSON.stringify(statusResult, null, 2)
+        JSON.stringify(statusResult, null, 2),
       );
+
+      // Normalize field names (AI server uses "player detection status" with spaces)
+      const detectionStatus =
+        statusResult['player detection status'] ||
+        statusResult.processing_status;
 
       // Check if still processing
       if (
-        statusResult.processing_status === 'processing' ||
-        statusResult.processing_status === 'pending' ||
+        detectionStatus === 'processing' ||
+        detectionStatus === 'pending' ||
         statusResult.status === 'processing'
       ) {
         console.log(
-          `Player detection ${matchId} still processing, will check again later`
+          `Player detection ${matchId} still processing, will check again later`,
         );
         match.playerDetectionRetryCount = retryCount + 1;
         await match.save();
@@ -190,13 +349,34 @@ class AnalysisStatusCronJob {
         throw new Error(
           statusResult.error ||
             statusResult.message ||
-            'Player detection failed'
+            'Player detection failed',
         );
       }
 
       // Check if completed
-      if (statusResult.processing_status === 'completed') {
-        match.players = statusResult.players || [];
+      if (
+        detectionStatus === 'completed' ||
+        statusResult.status === 'success'
+      ) {
+        // Transform players array to expected format
+        // AI server returns array of URL strings, we need objects with image_url and player_id
+        const playersArray = statusResult.players || [];
+        const formattedPlayers = playersArray.map((player, index) => {
+          // If already an object with image_url, use it as-is
+          if (typeof player === 'object' && player.image_url) {
+            return player;
+          }
+          // If it's a string URL, convert to expected format
+          if (typeof player === 'string') {
+            return {
+              image_url: player,
+              player_id: String.fromCharCode(97 + index), // a, b, c, d, etc.
+            };
+          }
+          return player;
+        });
+
+        match.players = formattedPlayers;
         match.fetchedPlayerData = match.players.length > 0;
         match.playerDetectionStatus = 'completed';
         match.playerDetectionCompletedAt = new Date();
@@ -205,13 +385,13 @@ class AnalysisStatusCronJob {
         await match.save();
 
         console.log(
-          `Player detection completed for ${matchId}: ${match.players.length} players found`
+          `Player detection completed for ${matchId}: ${match.players.length} players found`,
         );
 
         await matchNotificationService.notifyPlayerDetectionComplete(
           creator._id,
           match,
-          match.players
+          match.players,
         );
         return;
       }
@@ -219,7 +399,7 @@ class AnalysisStatusCronJob {
       // Unknown status - increment retry
       console.log(
         `Unknown player detection status for ${matchId}:`,
-        statusResult.processing_status || statusResult.status
+        statusResult.processing_status || statusResult.status,
       );
       match.playerDetectionRetryCount = retryCount + 1;
       await match.save();
@@ -231,7 +411,7 @@ class AnalysisStatusCronJob {
       await match.save();
 
       console.log(
-        `Will retry player detection for ${matchId} on next cron run (${match.playerDetectionRetryCount}/${MAX_RETRIES})`
+        `Will retry player detection for ${matchId} on next cron run (${match.playerDetectionRetryCount}/${MAX_RETRIES})`,
       );
 
       // If this was the last retry, mark as failed
@@ -253,7 +433,7 @@ class AnalysisStatusCronJob {
       await matchNotificationService.notifyPlayerDetectionFailed(
         match.creator,
         match,
-        'Player detection timed out. Please try uploading the video again.'
+        'Player detection timed out. Please try uploading the video again.',
       );
 
       console.log(`Player detection timeout handled for match ${match._id}`);
@@ -271,11 +451,11 @@ class AnalysisStatusCronJob {
       await matchNotificationService.notifyPlayerDetectionFailed(
         match.creator,
         match,
-        `Player detection failed: ${errorMessage}`
+        `Player detection failed: ${errorMessage}`,
       );
 
       console.log(
-        `Player detection failure handled for match ${match._id}: ${errorMessage}`
+        `Player detection failure handled for match ${match._id}: ${errorMessage}`,
       );
     } catch (error) {
       console.error(`Error handling player detection failure:`, error);
@@ -339,7 +519,7 @@ class AnalysisStatusCronJob {
 
       if (result.deletedCount > 0) {
         console.log(
-          `Cleaned up ${result.deletedCount} expired processing locks`
+          `Cleaned up ${result.deletedCount} expired processing locks`,
         );
       }
     } catch (error) {
@@ -368,12 +548,11 @@ class AnalysisStatusCronJob {
 
     try {
       console.log(
-        `Checking status for analysis: ${matchId} with job_id: ${analysisId}`
+        `Checking status for analysis: ${matchId} with job_id: ${analysisId}`,
       );
 
-      const rawStatus = await VideoAnalysisService.getAnalysisStatus(
-        analysisId
-      );
+      const rawStatus =
+        await VideoAnalysisService.getAnalysisStatus(analysisId);
 
       console.log(JSON.stringify(rawStatus, null, 2).bold.green);
 
@@ -425,7 +604,7 @@ class AnalysisStatusCronJob {
       console.log(`Found ${pendingMatches.length} pending analyses to check`);
 
       const promises = pendingMatches.map((match) =>
-        this.checkSingleAnalysis(match)
+        this.checkSingleAnalysis(match),
       );
 
       await Promise.allSettled(promises);
@@ -443,15 +622,15 @@ class AnalysisStatusCronJob {
 
       console.log(
         '🔍 handleCompletedAnalysis - status object keys:',
-        Object.keys(status)
+        Object.keys(status),
       );
       console.log(
         '🔍 handleCompletedAnalysis - has results:',
-        'results' in status
+        'results' in status,
       );
       console.log(
         '🔍 handleCompletedAnalysis - results.all_clips:',
-        status.results?.all_clips
+        status.results?.all_clips,
       );
 
       let results = transformNewAnalysisResults(status);
@@ -464,8 +643,8 @@ class AnalysisStatusCronJob {
         `Analysis ${analysisId} completed with results: ${JSON.stringify(
           results,
           null,
-          2
-        )}`.bold.green
+          2,
+        )}`.bold.green,
       );
 
       await Match.findByIdAndUpdate(matchId, {
@@ -484,7 +663,7 @@ class AnalysisStatusCronJob {
             analysisId: analysisId,
             type: 'analysis_completed',
             status: 'completed',
-          }
+          },
         );
       }
 
@@ -516,7 +695,7 @@ class AnalysisStatusCronJob {
             type: 'analysis_failed',
             status: 'failed',
             error: status.message,
-          }
+          },
         );
       }
 
@@ -553,7 +732,7 @@ class AnalysisStatusCronJob {
       } else {
         console.error(
           `Temporary error checking analysis ${analysisId}:`,
-          error.message
+          error.message,
         );
       }
     } catch (updateError) {
@@ -568,10 +747,10 @@ class AnalysisStatusCronJob {
       });
 
       const playerDetectionLocks = activeLocks.filter((lock) =>
-        lock.matchId.startsWith('player_')
+        lock.matchId.startsWith('player_'),
       );
       const analysisLocks = activeLocks.filter((lock) =>
-        lock.matchId.startsWith('analysis_')
+        lock.matchId.startsWith('analysis_'),
       );
 
       return {

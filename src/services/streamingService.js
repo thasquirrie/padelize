@@ -1,5 +1,4 @@
 import fetch from 'node-fetch';
-import logger from '../config/logger.js';
 
 const STREAMING_API_BASE_URL =
   process.env.STREAMING_API_BASE_URL || 'https://streaming.padelize.ai';
@@ -32,7 +31,7 @@ class StreamingService {
         webhookUrl: webhookUrl,
       };
 
-      logger.info('Creating streaming download job', {
+      global.createLogger.info('Creating streaming download job', {
         matchId,
         videoLink: videoLink.substring(0, 50) + '...',
         webhookUrl,
@@ -49,7 +48,7 @@ class StreamingService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        logger.error('Streaming API error', {
+        global.createLogger.error('Streaming API error', {
           status: response.status,
           error: errorText,
         });
@@ -60,7 +59,7 @@ class StreamingService {
 
       const result = await response.json();
 
-      logger.info('Streaming download job created', {
+      global.createLogger.info('Streaming download job created', {
         matchId,
         jobId: result.jobId,
         status: result.status,
@@ -68,7 +67,7 @@ class StreamingService {
 
       return result;
     } catch (error) {
-      logger.error('Error creating streaming download job', {
+      global.createLogger.error('Error creating streaming download job', {
         matchId,
         error: error.message,
       });
@@ -106,7 +105,7 @@ class StreamingService {
 
       return await response.json();
     } catch (error) {
-      logger.error('Error getting streaming job status', {
+      global.createLogger.error('Error getting streaming job status', {
         jobId,
         error: error.message,
       });
